@@ -39,7 +39,8 @@ A file tab (one per file; opening it again shows the same tab):
   Local images are copied into the cache; web images (shields.io and the like) downloaded into it.
 - Images: a zoom control on the left of the header (−, the scale, +). Fit shows the whole image;
   clicking the scale toggles fit and 100%; `Ctrl` + wheel, `Ctrl` `+` / `-` / `0` / `1` zoom too.
-  Zoomed in, the image scrolls both ways.
+  Zoomed in, drag with the left button (or use the wheel, `Shift` for sideways) to move around;
+  the image stops 12 px past its edges. A double-click switches between fit and 100%.
 - Code with syntax colors, images,
   or "Binary file — no preview" with Open with its app and Show in folder.
 - Editing: the header becomes Cancel (a crossed pencil, in the same place as Edit) and Save

@@ -31,7 +31,7 @@ Made for Windows and macOS. Linux should work but is untested.
 - Chinese and other non-English names show correctly.
 - Click a file to open it in its own tab. Edit text files and save with `Ctrl+S`.
 - Markdown has three views: Preview, Split (source beside the live result) and Code, with images shown, including HTML `<img>`, centered blocks, badges and images in tables.
-- Images open with zoom: fit, 100%, or step in and out (`Ctrl` + wheel, `Ctrl` `+` / `-`).
+- Images open with zoom: fit, 100%, or step in and out (`Ctrl` + wheel, `Ctrl` `+` / `-`). Drag with the left button to look around; double-click switches between fit and 100%.
 
 ## huntaway-newspace
 

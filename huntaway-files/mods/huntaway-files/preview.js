@@ -61,7 +61,7 @@ export class Preview {
 
   open(path, on, cx) {
     this.release();
-    Object.assign(this, { path, on, zoom: null, imageSize: null, kind: kindOf(path), text: null, error: null, loading: true, editing: false, stale: false, notice: null, token: this.token + 1 });
+    Object.assign(this, { path, on, zoom: null, pan: { x: 0, y: 0 }, drag: null, imageSize: null, kind: kindOf(path), text: null, error: null, loading: true, editing: false, stale: false, notice: null, token: this.token + 1 });
     this.load(cx);
   }
 
@@ -190,8 +190,8 @@ export class Preview {
       const k = e.keystroke.replace(/^cmd-/, "ctrl-");
       if (k === "ctrl-=" || k === "ctrl-+" || k === "ctrl-shift-=") { this.zoomStep(1, cx); return true; }
       if (k === "ctrl--") { this.zoomStep(-1, cx); return true; }
-      if (k === "ctrl-0") { this.zoom = null; cx.notify(); return true; }
-      if (k === "ctrl-1") { this.zoom = 1; cx.notify(); return true; }
+      if (k === "ctrl-0") { this.setZoom(null, cx); return true; }
+      if (k === "ctrl-1") { this.setZoom(1, cx); return true; }
     }
     return false;
   }
@@ -207,7 +207,16 @@ export class Preview {
   /** One zoom step in (dir 1) or out (-1), from wherever the image is now. */
   zoomStep(dir, cx) {
     const now = this.scale();
-    this.zoom = dir > 0 ? ZOOMS.find(z => z > now + 0.001) ?? ZOOMS[ZOOMS.length - 1] : [...ZOOMS].reverse().find(z => z < now - 0.001) ?? ZOOMS[0];
+    this.setZoom(dir > 0 ? ZOOMS.find(z => z > now + 0.001) ?? ZOOMS[ZOOMS.length - 1] : [...ZOOMS].reverse().find(z => z < now - 0.001) ?? ZOOMS[0], cx);
+  }
+
+  /** Sets the zoom (null: fit), keeping the spot in the middle of the tab where it was. */
+  setZoom(zoom, cx) {
+    const before = this.scale();
+    this.zoom = zoom;
+    const after = this.scale();
+    this.pan = zoom ? { x: (this.pan?.x ?? 0) * after / before, y: (this.pan?.y ?? 0) * after / before } : { x: 0, y: 0 };
+    this.drag = null;
     cx.notify();
   }
 
@@ -223,7 +232,7 @@ export class Preview {
         .text_size(11.5).text_color(this.zoom ? t.foreground : t.muted).hover(s => s.bg(t.hover))
         .tooltip(this.zoom ? "Fit to the tab (Ctrl+0)" : "Actual size (Ctrl+1)")
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { this.zoom = this.zoom ? null : 1; cx.notify(); })
+        .on_click((_e, cx) => this.setZoom(this.zoom ? null : 1, cx))
         .child(this.zoom ? `${Math.round(this.zoom * 100)}%` : `Fit ${Math.round(this.scale() * 100)}%`))
       .child(btn("pv-zoom-in", "+", "Zoom in (Ctrl++)", (_e, cx) => this.zoomStep(1, cx)));
   }
@@ -278,15 +287,49 @@ export class Preview {
     else if (this.kind === "image") {
       if (!this.image) content = note(this.loading ? "Loading image…" : "No preview");
       else {
-        // Fit: the whole image in the tab. Zoomed: its size times the zoom, scrolling both ways.
-        // Ctrl (Cmd) and the wheel zoom too.
-        const n = this.imageSize, s = this.scale();
-        const pic = n ? image(this.image).w(n.w * s).h(n.h * s).flex_none() : image(this.image).size_full();
-        content = div().id("pv-image").flex_1().min_h(0).bg(t.surface)
-          .when(Boolean(this.zoom), el => el.overflow_scrollbar())
+        // Fit: the whole image in the tab. Zoomed: its size times the zoom, moved by dragging with
+        // the left button or by the wheel (Shift: sideways). Ctrl (Cmd) and the wheel zoom;
+        // a double-click switches between fit and 100%.
+        const n = this.imageSize, s = this.scale(), box = this.imageBox;
+        let pic, canDrag = false;
+        if (this.zoom && n && box) {
+          const w = n.w * s, h = n.h * s;
+          // How far the image can move: until its edge meets the tab's, with a 12 px margin.
+          const maxX = Math.max(0, (w - box.w) / 2 + 12), maxY = Math.max(0, (h - box.h) / 2 + 12);
+          const clamp = (v, m) => Math.max(-m, Math.min(m, v));
+          this.pan = { x: clamp(this.pan?.x ?? 0, maxX), y: clamp(this.pan?.y ?? 0, maxY) };
+          canDrag = maxX > 0 || maxY > 0;
+          pic = image(this.image).absolute().left((box.w - w) / 2 + this.pan.x).top((box.h - h) / 2 + this.pan.y).w(w).h(h);
+        } else {
+          pic = h_flex().size_full().p(12).items_center().justify_center()
+            .child(n ? image(this.image).w(n.w * s).h(n.h * s).flex_none() : image(this.image).size_full());
+        }
+        const endDrag = cx => { if (this.drag) { this.drag = null; cx.notify(); } };
+        content = div().id("pv-image").relative().flex_1().min_h(0).overflow_hidden().bg(t.surface)
+          .when(canDrag, el => this.drag ? el.cursor_grabbing() : el.cursor_grab())
           .on_size_change((sz, cx) => { const w = Math.round(sz.width), h = Math.round(sz.height); if (w !== this.imageBox?.w || h !== this.imageBox?.h) { this.imageBox = { w, h }; cx.notify(); } })
-          .on_scroll_wheel((e, cx) => { if ((e.modifiers?.control || e.modifiers?.platform) && Math.abs(e.delta.y) >= 1) { this.zoomStep(e.delta.y > 0 ? 1 : -1, cx); cx.stop_propagation(); } })
-          .child(h_flex().min_w_full().min_h_full().p(12).items_center().justify_center().child(pic));
+          .on_mouse_down("left", (e, cx) => {
+            if (e.click_count === 2) { this.setZoom(this.zoom ? null : 1, cx); return; }
+            if (canDrag) { this.drag = { x: e.position.x, y: e.position.y, px: this.pan.x, py: this.pan.y }; cx.notify(); }
+          })
+          .on_mouse_move((e, cx) => {
+            if (!this.drag) return;
+            this.pan = { x: this.drag.px + e.position.x - this.drag.x, y: this.drag.py + e.position.y - this.drag.y };
+            cx.notify();
+          })
+          .on_mouse_up("left", (_e, cx) => endDrag(cx))
+          .on_hover((hovered, cx) => { if (!hovered) endDrag(cx); })
+          .on_scroll_wheel((e, cx) => {
+            if (e.modifiers?.control || e.modifiers?.platform) {
+              if (Math.abs(e.delta.y) >= 1) { this.zoomStep(e.delta.y > 0 ? 1 : -1, cx); cx.stop_propagation(); }
+              return;
+            }
+            if (!canDrag) return;
+            const dx = e.modifiers?.shift ? e.delta.y : e.delta.x, dy = e.modifiers?.shift ? 0 : e.delta.y;
+            this.pan = { x: this.pan.x + dx, y: this.pan.y + dy };
+            cx.stop_propagation(); cx.notify();
+          })
+          .child(pic);
       }
     } else if (this.loading && !this.state) content = note("Loading…");
     else if (this.kind === "markdown" && typeof this.text === "string" && this.mdView !== "code" && (this.mdView === "preview" || Boolean(this.state))) {
