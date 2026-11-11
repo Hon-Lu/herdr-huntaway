@@ -1,15 +1,18 @@
 import { div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
+import { layout } from "herdr";
 import { extname } from "./paths.js";
 
 export const MOD = "huntaway-files";
 /** Requests from this mod's menus and dialogs to the panel. */
 export const REQUEST = "huntaway-files.request";
+/** In the huntaway layout (its wallpaper is ours), the panel is glass; anywhere else it is solid. */
+const huntaway = () => /^mods\/huntaway-chrome\//.test(layout()?.background?.image ?? "");
 /** Frosted glass on dark themes; nearly solid on light ones, so text keeps its contrast. */
-export const glass = c => !/^#[0-9a-f]{6}$/i.test(c) ? c : c + (parseInt(c.slice(1, 3), 16) + parseInt(c.slice(3, 5), 16) + parseInt(c.slice(5, 7), 16) < 384 ? "cc" : "f5");
+export const glass = c => !huntaway() || !/^#[0-9a-f]{6}$/i.test(c) ? c : c + (parseInt(c.slice(1, 3), 16) + parseInt(c.slice(3, 5), 16) + parseInt(c.slice(5, 7), 16) < 384 ? "cc" : "f5");
 /** Glass edges (dark themes): a faint light rim. */
 const darkTheme = t => { const m = /^#(..)(..)(..)/i.exec(t.background ?? ""); return !m || parseInt(m[1], 16) + parseInt(m[2], 16) + parseInt(m[3], 16) < 384; };
-export const rim = t => darkTheme(t) ? "#ffffff1f" : "#0000001a";
+export const rim = t => !huntaway() ? t.border : darkTheme(t) ? "#ffffff1f" : "#0000001a";
 export const icon = name => `mods/${MOD}/icons/${name}.svg`;
 
 const stop = (_e, cx) => cx.stop_propagation();

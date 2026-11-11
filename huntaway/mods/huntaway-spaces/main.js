@@ -5,8 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { NewSpace, NEW_SPACE_SIZE } from "./newspace.js";
-import { spaces, machines, panes, agents, setAgentOrder, props, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { spaces, machines, panes, agents, setAgentOrder, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 
 // Frosted glass on dark themes: card fills let the blurred wallpaper through. Light themes stay
 // nearly solid, so terminal text keeps its contrast on white.
@@ -78,8 +77,6 @@ export function tone(t, status) {
 
 export default class Spaces extends View {
   init(_props, cx) {
-    // The same mod opens the New space dialog (props.role).
-    if (props()?.role === "new-space") { this.dialog = new NewSpace(); this.dialog.init(cx, cx.focus_handle()); return; }
     this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
@@ -500,12 +497,11 @@ export default class Spaces extends View {
       .when(st === "done", (el) => el.child(div().size(6).mx(3).flex_none().rounded(3).bg(t.done)));
   }
 
-  // A new space on this computer starts in the New space dialog: recent folders, a typed path
-  // or the system picker, and a terminal or an agent to start. Another machine's space starts
-  // in that machine's home, as before.
+  // A new space on this computer starts in the New space dialog (huntaway-newspace): search or
+  // browse to its folder. Another machine's space starts in that machine's home, as before.
   newSpace(machine) {
-    if (machine) { run("space.new", { machine }); return; }
-    openOverlay({ mod: "huntaway-spaces", kind: "dialog", frame: "none", ...NEW_SPACE_SIZE, props: { role: "new-space" } });
+    if (machine) run("space.new", { machine });
+    else run("mod.open", { name: "huntaway-newspace" });
   }
 
   // The rail: each space is its colored letter tile, as in the full list; a dot on its corner
@@ -536,10 +532,7 @@ export default class Spaces extends View {
   }
 
 
-  close() { this.dialog?.close(); }
-
   render() {
-    if (this.dialog) return this.dialog.render();
     const t = theme();
     const collapsed = narrow();
     const palette = ["ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"];

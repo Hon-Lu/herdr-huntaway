@@ -10,9 +10,7 @@ import { norm, isWin, listDirs, folderIndex, searchFolders } from "./folders.js"
 const W = 520, ROW = 40, ROWS = 7, SLIDE = { duration: 160, easing: "ease-out" };
 const isDark = c => { const m = /^#(..)(..)(..)/i.exec(c ?? ""); return !m || parseInt(m[1], 16) + parseInt(m[2], 16) + parseInt(m[3], 16) < 384; };
 
-/** The dialog's size, for openOverlay. */
-export const NEW_SPACE_SIZE = { width: W, height: 48 + 52 + ROWS * ROW + 12 + 60 + 2 };
-
+// The dialog is 48 + 52 + ROWS * ROW + 12 + 60 + 2 = 454 px tall: keep mod.json's overlay in step.
 const key = p => norm(p).toLowerCase();
 const sep = () => (isWin() ? "\\" : "/");
 const show = p => { const n = norm(p), h = norm(home()); const f = n === h ? "~" : n.toLowerCase().startsWith(h.toLowerCase() + "/") ? "~" + n.slice(h.length) : n; return isWin() ? f.replace(/\//g, "\\") : f; };
