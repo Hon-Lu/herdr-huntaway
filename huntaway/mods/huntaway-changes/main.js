@@ -1,3 +1,4 @@
+// Modified from the "changes" mod shipped with Herdr App (Apache License 2.0), changed for the huntaway layout.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, v_virtual_list } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings } from "herdr";

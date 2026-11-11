@@ -1,6 +1,6 @@
 # Huntaway
 
-![Windows](https://img.shields.io/badge/Windows-supported-0078D4?style=flat-square&logo=windows&logoColor=white) ![macOS](https://img.shields.io/badge/macOS-supported-111111?style=flat-square&logo=apple&logoColor=white) ![Herdr App](https://img.shields.io/badge/Herdr%20App-0.1.15-6E56CF?style=flat-square)
+![Windows](https://img.shields.io/badge/Windows-supported-0078D4?style=flat-square&logo=windows&logoColor=white) ![macOS](https://img.shields.io/badge/macOS-supported-111111?style=flat-square&logo=apple&logoColor=white) ![Herdr App](https://img.shields.io/badge/Herdr%20App-0.1.15-6E56CF?style=flat-square) ![License](https://img.shields.io/badge/license-Apache%202.0-D22128?style=flat-square)
 
 A layout and two mods for [Herdr App](https://herdr.dev). Take the whole layout, or just the mods you want.
 
@@ -95,3 +95,7 @@ Then:
 - Git is optional. Without it, Files still browses and searches, just without Git status.
 - Some mods in the layout are restyled copies of Herdr's own (spaces, tabs, status bar, pane header, Changes). They don't update with Herdr; if something looks off after a Herdr update, update this repository too.
 - Each folder has a `RECIPE.md`: a description an agent can rebuild it from.
+
+## License
+
+[Apache License 2.0](LICENSE). Some mods in the layout (spaces, tabs, status bar, pane header, Changes and the sidebar's brand and footer) started from the mods shipped with Herdr App, which are under the same license; each says so at the top of its `main.js`.

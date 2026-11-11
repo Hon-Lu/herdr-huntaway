@@ -1,3 +1,4 @@
+// Modified from the "pane" mod shipped with Herdr App (Apache License 2.0), changed for the huntaway layout.
 // A pane's header, for layouts that frame their panes:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "huntaway-pane" } } } }
 // Shows the program's icon (the app's program table), the agent's name or

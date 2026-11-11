@@ -1,3 +1,4 @@
+// Modified from the "workspace-status" mod shipped with Herdr App (Apache License 2.0), changed for the huntaway layout.
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, agents, theme, run, window, keys } from "herdr";

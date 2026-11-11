@@ -1,3 +1,4 @@
+// Modified from the "workspace-chrome" mod shipped with Herdr App (Apache License 2.0), changed for the huntaway layout.
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { theme, run, props, window, shared, setShared, updates, layout } from "herdr";

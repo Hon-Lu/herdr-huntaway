@@ -1,3 +1,4 @@
+// Started from the "tabs" mod shipped with Herdr App (Apache License 2.0), changed for the huntaway layout.
 // The tab bar of the huntaway layout. No fill of its own: the canvas shows
 // through. The tabs share one card on the left, then +; the agent inbox bell, the Files and
 // Changes panels and the window buttons share one card on the right.
