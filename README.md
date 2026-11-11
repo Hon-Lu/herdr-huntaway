@@ -1,5 +1,7 @@
 # Huntaway
 
+![Windows](https://img.shields.io/badge/Windows-supported-0078D4?style=flat-square&logo=windows&logoColor=white) ![macOS](https://img.shields.io/badge/macOS-supported-111111?style=flat-square&logo=apple&logoColor=white) ![Herdr App](https://img.shields.io/badge/Herdr%20App-0.1.15-6E56CF?style=flat-square)
+
 A layout and two mods for [Herdr App](https://herdr.dev). Take the whole layout, or just the mods you want.
 
 | | What it is |
@@ -8,7 +10,7 @@ A layout and two mods for [Herdr App](https://herdr.dev). Take the whole layout,
 | [**huntaway-files**](huntaway-files) | A fast Files panel. Click a file to open it in its own tab: code, Markdown, images, and simple editing. |
 | [**huntaway-newspace**](huntaway-newspace) | A New space dialog. Search every folder in your home, or type a path to browse, then start a space there. |
 
-Works on Windows and macOS. Linux should work but is untested.
+Made for Windows and macOS. Linux should work but is untested.
 
 ## huntaway
 
@@ -28,6 +30,8 @@ Works on Windows and macOS. Linux should work but is untested.
 - Rename, delete to the Recycle Bin or Trash, show in File Explorer or Finder.
 - Chinese and other non-English names show correctly.
 - Click a file to open it in its own tab. Edit text files and save with `Ctrl+S`.
+- Markdown has three views: Preview, Split (source beside the live result) and Code, with images shown, including HTML `<img>`, centered blocks, badges and images in tables.
+- Images open with zoom: fit, 100%, or step in and out (`Ctrl` + wheel, `Ctrl` `+` / `-`).
 
 ## huntaway-newspace
 

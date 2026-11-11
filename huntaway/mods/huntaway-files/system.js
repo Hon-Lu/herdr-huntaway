@@ -288,9 +288,8 @@ export const writeText = (path, text, expected) => writeTextFile(path, text, exp
 
 const CACHE = ".cache/huntaway-files";
 let cacheSwept = false;
-/** Copies an image under the app folder (image() reads only there) and returns the app-relative path. */
-export async function cacheImage(path, on) {
-  if (on) throw new Error("Image preview is only available for files on this computer");
+/** The cache folder, swept of files older than an hour the first time it is used. */
+async function cacheDir() {
   const dir = join(norm(appHome()), CACHE);
   try { await fs.mkdir(dir, { recursive: true }); } catch {}
   if (!cacheSwept) {
@@ -303,23 +302,144 @@ export async function cacheImage(path, on) {
       }
     } catch {}
   }
+  return dir;
+}
+
+let cacheSeq = 0;
+function cacheName(source, ext) {
   let hash = 0;
-  for (const ch of path) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  const name = `${hash.toString(36)}-${Date.now()}.${extname(path) || "img"}`, dest = join(dir, name);
-  if (underHome(path, on) && !refused.has(dirname(path))) {
-    try {
-      const bytes = await fs.readFile(path);
-      if (bytes.length > 40e6) throw new Error("This image is larger than 40 MB");
-      await fs.writeFile(dest, bytes);
-      return `${CACHE}/${name}`;
-    } catch (e) { if (/larger/.test(String(e))) throw e; }
+  for (const ch of source) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return `${hash.toString(36)}-${Date.now()}${(cacheSeq++).toString(36)}.${ext || "img"}`;
+}
+
+/**
+ * Copies files and downloads web addresses into the cache in one go, with the system's own
+ * tools: Herdr's fs.writeFile writes binary data as 0 bytes, and fetch has no binary body.
+ * `jobs`: [{ from, to }] where `from` is a path or an http(s) address. Missing files are skipped.
+ */
+async function fill(jobs) {
+  if (!jobs.length) return;
+  if (isWindows()) {
+    const lines = jobs.map(({ from, to }) => /^https?:/i.test(from)
+      ? `try { & curl.exe -sSL --max-time 20 -o ${psq(display(to, null))} ${psq(from)} } catch {}`
+      : `try { Copy-Item -LiteralPath ${psq(display(from, null))} -Destination ${psq(display(to, null))} -Force } catch {}`);
+    await powershell(lines.join("\n"), { timeout: 60000 });
+  } else {
+    const args = jobs.flatMap(({ from, to }) => [from, to]);
+    await sh('while [ $# -gt 1 ]; do case "$1" in http://*|https://*) curl -sSL --max-time 20 -o "$2" "$1" ;; *) cp -- "$1" "$2" ;; esac; shift 2; done 2>/dev/null; true', args, { timeout: 60000 });
   }
-  if (isWindows()) await powershell(`Copy-Item -LiteralPath ${psq(display(path, null))} -Destination ${psq(display(dest, null))} -Force`);
-  else await sh('cp -- "$1" "$2"', [path, dest]);
+}
+
+/**
+ * SVGs styled with CSS variables (`fill: var(--bg)`) draw black in Herdr: its SVG renderer has
+ * no var(). Rewrites a cached SVG with the values put in, the dark-scheme ones on a dark theme.
+ */
+async function resolveSvgVars(file, dark) {
+  let text;
+  try { text = await fs.readFile(file, "utf8"); } catch { return; }
+  if (!/var\(--/.test(text)) return;
+  const css = [...text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map(m => m[1]).join("\n");
+  const media = /@media[^{]*prefers-color-scheme\s*:\s*(dark|light)[^{]*\{((?:[^{}]*\{[^{}]*\})*[^{}]*)\}/gi;
+  const vars = {};
+  const take = (block, force) => { for (const m of block.matchAll(/--([\w-]+)\s*:\s*([^;}]+)/g)) if (force || !(m[1] in vars)) vars[m[1]] = m[2].trim(); };
+  take(css.replace(media, ""), false);
+  for (const m of css.matchAll(media)) if ((m[1].toLowerCase() === "dark") === dark) take(m[2], true);
+  let out = text, guard = 0;
+  while (/var\(--/.test(out) && guard++ < 5) out = out.replace(/var\(\s*--([\w-]+)\s*(?:,\s*([^)]+))?\)/g, (_m, name, fallback) => vars[name] ?? (fallback ?? "currentColor").trim());
+  try { await fs.writeFile(file, out); } catch {}
+}
+
+/** Copies an image under the app folder (image() reads only there) and returns the app-relative path. */
+export async function cacheImage(path, on, dark = true) {
+  if (on) throw new Error("Image preview is only available for files on this computer");
+  const dir = await cacheDir(), name = cacheName(path, extname(path));
+  await fill([{ from: path, to: join(dir, name) }]);
+  if (!(await fs.exists(join(dir, name)))) throw new Error("Could not read the image");
+  if (/\.svg$/i.test(name)) await resolveSvgVars(join(dir, name), dark);
   return `${CACHE}/${name}`;
 }
+/** The size of an image already in the cache, or null. */
+export async function cachedImageSize(rel) {
+  try { return imageSize(await fs.readFile(join(norm(appHome()), rel))); } catch { return null; }
+}
+
 export async function dropCached(rel) {
   if (rel) try { await fs.unlink(join(norm(appHome()), rel)); } catch {}
+}
+
+/** An image's size in pixels from its first bytes: PNG, GIF, JPEG, WebP, BMP or SVG. null if unknown. */
+export function imageSize(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const u16be = i => (b[i] << 8) | b[i + 1], u16le = i => b[i] | (b[i + 1] << 8);
+  const u32be = i => ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
+  const u32le = i => b[i] + (b[i + 1] << 8) + (b[i + 2] << 16) + ((b[i + 3] << 24) >>> 0);
+  if (b.length < 24) return null;
+  if (b[0] === 0x89 && b[1] === 0x50) return { w: u32be(16), h: u32be(20) };
+  if (b[0] === 0x47 && b[1] === 0x49) return { w: u16le(6), h: u16le(8) };
+  if (b[0] === 0x42 && b[1] === 0x4d) return { w: u32le(18), h: Math.abs(u32le(22) | 0) };
+  if (b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57 && b[9] === 0x45) {
+    const kind = String.fromCharCode(b[12], b[13], b[14], b[15]);
+    if (kind === "VP8 ") return { w: u16le(26) & 0x3fff, h: u16le(28) & 0x3fff };
+    if (kind === "VP8L") { const v = u32le(21); return { w: (v & 0x3fff) + 1, h: ((v >> 14) & 0x3fff) + 1 }; }
+    if (kind === "VP8X") return { w: 1 + b[24] + (b[25] << 8) + (b[26] << 16), h: 1 + b[27] + (b[28] << 8) + (b[29] << 16) };
+  }
+  if (b[0] === 0xff && b[1] === 0xd8) {
+    for (let i = 2; i + 9 < b.length;) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const m = b[i + 1];
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { w: u16be(i + 7), h: u16be(i + 5) };
+      i += 2 + u16be(i + 2);
+    }
+    return null;
+  }
+  // SVG: width/height, else the viewBox.
+  // The runtime has no TextDecoder; the tag's attributes are ASCII, so bytes as characters will do.
+  let head = "";
+  for (let i = 0; i < Math.min(b.length, 4096); i++) head += String.fromCharCode(b[i]);
+  const tag = /<svg\b[^>]*>/i.exec(head)?.[0];
+  if (!tag) return null;
+  const num = name => { const m = new RegExp(`\\b${name}\\s*=\\s*["']\\s*([\\d.]+)(px)?\\s*["']`, "i").exec(tag); return m ? Number(m[1]) : null; };
+  const vb = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(tag);
+  const w = num("width") ?? (vb ? Number(vb[1]) : null), h = num("height") ?? (vb ? Number(vb[2]) : null);
+  return w && h ? { w, h } : null;
+}
+
+/**
+ * The images a Markdown file points at, made ready to draw in one batch: local paths (relative
+ * to the file's folder) are copied into the cache, web addresses downloaded into it.
+ * Returns a Map from each source to { rel, size } or { error }.
+ */
+export async function cacheMarkdownImages(sources, fileDir, on, dark = true) {
+  const out = new Map(), jobs = [], dir = await cacheDir();
+  for (const src of sources) {
+    let from = src, ext;
+    if (/^https?:\/\//i.test(src)) {
+      ext = /\.(png|jpe?g|gif|webp|svg|bmp)(?:[?#]|$)/i.exec(src)?.[1] ?? (/shields\.io|badge|\.svg/i.test(src) ? "svg" : "img");
+    } else {
+      if (on) { out.set(src, { error: "Images are shown only for files on this computer" }); continue; }
+      let path = decodeURIComponent(src.replace(/^file:\/\/\/?/i, "").replace(/[?#].*$/, ""));
+      path = /^([a-z]:)?[\\/]/i.test(path) ? norm(path) : norm(join(fileDir, path));
+      const parts = [];
+      for (const part of path.split("/")) { if (part === "..") parts.pop(); else if (part !== ".") parts.push(part); }
+      from = parts.join("/"); ext = extname(from);
+    }
+    const name = cacheName(src, ext);
+    jobs.push({ src, from, to: join(dir, name), rel: `${CACHE}/${name}` });
+  }
+  try { await fill(jobs); } catch {}
+  for (const job of jobs) {
+    try {
+      let bytes = await fs.readFile(job.to);
+      if (!bytes.length) throw new Error("empty");
+      if (bytes[0] === 0x3c || /\.svg$/i.test(job.to)) { await resolveSvgVars(job.to, dark); bytes = await fs.readFile(job.to); }
+      let size = null;
+      try { size = imageSize(bytes); } catch {}
+      out.set(job.src, { rel: job.rel, size });
+    } catch {
+      out.set(job.src, { error: /^https?:/i.test(job.src) ? "Could not download the image" : "Image file not found" });
+    }
+  }
+  return out;
 }
 
 // ---- file operations ------------------------------------------------------------

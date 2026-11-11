@@ -29,7 +29,18 @@ The panel:
 A file tab (one per file; opening it again shows the same tab):
 - A header with the folder (and the name, unless the layout's pane header already shows it), then
   the pencil (Edit) and Open with its app.
-- Code with syntax colors, Markdown rendered (links open other files in their own tabs), images,
+- For Markdown, a switch on the left of the header: Preview (rendered; links open other files in
+  their own tabs), Split (the source beside the rendered result, which follows the editor as you
+  type) and Code (the source). Its selection slides like the tab bar's; the choice is remembered.
+  Edit from Preview switches to Split, and back after.
+- Markdown images are drawn by the tab itself (Herdr's Markdown view draws none): Markdown and
+  HTML `<img>` (with `width`, and links around them), `align="center"` blocks centered paragraph by
+  paragraph, rows of badges side by side, and tables with images as a grid of equal columns.
+  Local images are copied into the cache; web images (shields.io and the like) downloaded into it.
+- Images: a zoom control on the left of the header (−, the scale, +). Fit shows the whole image;
+  clicking the scale toggles fit and 100%; `Ctrl` + wheel, `Ctrl` `+` / `-` / `0` / `1` zoom too.
+  Zoomed in, the image scrolls both ways.
+- Code with syntax colors, images,
   or "Binary file — no preview" with Open with its app and Show in folder.
 - Editing: the header becomes Cancel (a crossed pencil, in the same place as Edit) and Save
   (a disk icon, tinted when there are changes). Cancel throws the changes away; Save or
@@ -50,7 +61,8 @@ A file tab (one per file; opening it again shows the same tab):
 
 - `mods/huntaway-files/`: `mod.json` (`place: none`, `focusable`), `main.js` (picks a role from
   `props().role`: the panel, `menu`, `dialog` or `viewer`), `panel.js`, `menu.js`, `preview.js`,
-  `open.js`, `system.js`, `paths.js`, `ui.js`, `icons/`.
+  `open.js`, `markdown.js` (splits Markdown into text, HTML, image and table blocks), `system.js`,
+  `paths.js`, `ui.js`, `icons/`.
 - Put it in a layout as a block: `"content": { "mod": "huntaway-files" }` (Herdr's own layouts use
   the block id `files` in the stack `panel-body`).
 - Files are opened with `tab.new {name, mod: "huntaway-files", props: {role: "viewer", file, on}}`;
@@ -62,6 +74,11 @@ A file tab (one per file; opening it again shows the same tab):
   `open` / `xdg-open`.
 
 ## Watch out
+
+- Herdr's `fs.writeFile` writes binary data as 0 bytes and `fetch` has no binary body: copy and
+  download images with PowerShell (`Copy-Item`, `curl.exe`) or `cp` / `curl`, in one batch.
+- SVGs styled with CSS variables (`var(--bg)`) draw black: put the values in when caching
+  (the dark-scheme ones on a dark theme). The runtime has no `TextDecoder` either.
 
 - Windows PowerShell writes in the console's code page, which turns non-English names into
   garbage; every script sets `[Console]::OutputEncoding` to UTF-8 and is passed with

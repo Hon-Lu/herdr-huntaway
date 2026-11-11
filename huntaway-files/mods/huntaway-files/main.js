@@ -40,10 +40,12 @@ class Viewer {
   render() {
     const t = theme(), p = this.preview;
     if (!p) return div();
-    const status = p.status(), named = paneHeaderMod(layout()) === "huntaway-pane";
+    const status = p.status(), named = paneHeaderMod(layout()) === "huntaway-pane", modes = p.modes(t) ?? p.zoomControls(t);
     return v_flex().id("hlf-viewer").size_full().min_h(0).text_color(t.foreground).text_size(13)
       .track_focus(this.handle).on_key_down((e, cx) => { if (p.key(e, cx)) cx.stop_propagation(); })
       .child(h_flex().h(38).flex_none().px(12).gap(4).items_center().border_b(1).border_color(t.border)
+        // Markdown's Preview / Split / Code switch, or an image's zoom, sits on the left, apart from the actions.
+        .when(Boolean(modes), el => el.child(modes).child(div().w(8).flex_none()))
         .child(h_flex().flex_1().min_w(0).gap(8).items_center().tooltip(display(p.path ?? "", p.on))
           .when(!named, el => el.child(div().flex_none().max_w(320).truncate().font_semibold().text_size(12.5).child(basename(p.path ?? ""))))
           .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(status ? t.accent : t.dim)

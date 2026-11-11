@@ -67,6 +67,7 @@ long ago, and a `Needs you` or `Done` pill. Clicking a row focuses that agent. E
 - Switching tabs or spaces slides the selection; `+` in Spaces or `Ctrl+Shift+N` (while this
   layout shows) opens the New space dialog (`huntaway-newspace`).
 - Clicking a file in Files opens it in its own tab, or shows the tab it is already open in.
+  Markdown tabs switch between Preview, Split and Code.
 - Changing the theme, or light and dark appearance, swaps the wallpaper and the rims within a second.
 - The wallpaper is swapped only while `background` is one of the two shipped pictures; your own
   picture or color stays.
