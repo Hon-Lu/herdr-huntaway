@@ -28,6 +28,7 @@ Made for Windows and macOS. Linux should work but is untested.
 ![huntaway-files](huntaway-files/preview.png)
 
 - A file tree that follows your terminal's folder, with search, Git status and a refresh button.
+  The eye button (or `Ctrl+Shift+.`) hides hidden items such as `.vscode` or `.env`.
 - Rename, delete to the Recycle Bin or Trash, show in File Explorer or Finder.
 - Chinese and other non-English names show correctly.
 - Click a file to open it in its own tab. Edit text files and save with `Ctrl+S`.

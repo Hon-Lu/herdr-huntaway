@@ -13,6 +13,11 @@ const OPEN_LABEL = { windows: "Open in File Explorer", macos: "Open in Finder" }
 
 const ROW = 26, INDENT = 14;
 const NOISE = new Set([".git", ".DS_Store", "Thumbs.db", "desktop.ini"]);
+// Hidden items, shown only when asked for: dot names (.ai, .vscode, .gitignore) and Windows' own
+// `$` and System Volume Information folders. Windows' hidden attribute isn't read: the in-process
+// reader doesn't report it, and asking cmd for it would slow every folder in home.
+const isHidden = name => name.startsWith(".") || name.startsWith("$") || name.toLowerCase() === "system volume information";
+const hiddenPath = rel => rel.split("/").some(isHidden);
 const PRIORITY = { C: 6, D: 5, M: 4, R: 3, A: 2, U: 1 };
 
 function read(name, fallback) { try { const v = localStorage.getItem(name); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } }
@@ -40,6 +45,7 @@ export class Panel {
     this.scroll = VirtualListScrollHandle.new();
     this.range = { start: 0, end: 0 };
     this.version = 0; this.rowsCache = null;
+    this.showHidden = read("showHidden", true);
     this.lastRequest = shared(REQUEST)?.n ?? null;
     this.search = InputState.new({ placeholder: "Search files" });
     this.search.on("change", (_e, cx) => this.queryChanged(cx));
@@ -217,7 +223,7 @@ export class Panel {
         const d = this.dirs.get(dir);
         if (!d || d.entries === null) { out.push({ key: `status:${dir}`, kind: "status", text: "Loading…", depth, spin: true }); return; }
         if (d.error) out.push({ key: `status:${dir}`, kind: "status", text: d.error, depth, error: true });
-        const list = d.entries.filter(e => !NOISE.has(e.name));
+        const list = d.entries.filter(e => !NOISE.has(e.name) && (this.showHidden || !isHidden(e.name)));
         if (!list.length && !d.error) out.push({ key: `status:${dir}`, kind: "status", text: depth ? "Empty folder" : "This folder is empty", depth });
         for (const e of list) {
           const path = join(dir, e.name), open = e.dir && this.open.has(path);
@@ -266,7 +272,7 @@ export class Panel {
   runSearch(cx) {
     const ctx = this.ctx, query = this.query;
     if (!ctx || !query) { this.results = []; this.changed(); cx.notify(); return; }
-    const pick = () => { this.results = rank(this.index?.files ?? [], this.query); this.sel = this.results[0] ? join(ctx.root, this.results[0]) : null; };
+    const pick = () => { this.results = rank(this.searchable(), this.query); this.sel = this.results[0] ? join(ctx.root, this.results[0]) : null; };
     if (this.index && this.index.root === ctx.root && !this.index.stale) { pick(); this.changed(); cx.notify(); return; }
     if (this.indexing) return;
     this.indexing = true; this.searching = true; this.changed(); cx.notify();
@@ -283,6 +289,23 @@ export class Panel {
         this.changed(); cx.notify();
       }
     });
+  }
+
+  /** The indexed files search looks through: hidden ones too when shown, or when the words
+   *  themselves start a name with a dot (".env"). */
+  searchable() {
+    const files = this.index?.files ?? [];
+    if (this.showHidden || /(^|[\s\\/])\./.test(this.query)) return files;
+    return files.filter(rel => !hiddenPath(rel));
+  }
+
+  /** Show or hide hidden items, remembered for every folder. */
+  toggleHidden(cx) {
+    this.showHidden = !this.showHidden;
+    write("showHidden", this.showHidden);
+    this.changed();
+    if (this.query) this.runSearch(cx);
+    cx.notify();
   }
 
   clearSearch(cx) { this.search.set_value(""); this.query = ""; this.results = []; this.changed(); this.handle.focus(); cx.notify(); }
@@ -344,6 +367,8 @@ export class Panel {
       case "delete": if (row) this.dialog("delete", row); break;
       case "f5": this.refresh(cx); break;
       case "ctrl-f": case "cmd-f": this.search.focus(); break;
+      // As in Finder (Cmd+Shift+.); GPUI may spell Shift+. as ">".
+      case "ctrl-shift-.": case "cmd-shift-.": case "ctrl->": case "cmd->": this.toggleHidden(cx); break;
       case "escape": if (this.query) this.clearSearch(cx); else return; break;
       case "ctrl-c": case "cmd-c": if (row) { cx.write_to_clipboard(display(row.path, ctx?.on)); notify({ title: "Copied path", body: display(row.path, ctx?.on), level: "success", timeout: 2000 }); } break;
       default: return;
@@ -396,6 +421,9 @@ export class Panel {
         .child(h_flex().id("hlf-refresh").size(24).flex_none().items_center().justify_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover)).tooltip("Refresh (F5)")
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.refresh(cx))
           .child(loading ? svg(icon("spinner")).size(14).text_color(t.muted).spin(800) : svg(icon("refresh")).size(14).text_color(t.muted)))
+        // Hidden items (dot names): the open eye while they show.
+        .child(iconButton("hlf-hidden", this.showHidden ? "eye" : "eye-off", this.showHidden ? "Hide hidden items" : "Show hidden items",
+          (_e, cx) => this.toggleHidden(cx), t))
         // Opens the folder itself in the system's file manager (local folders only).
         .when(Boolean(root && !ctx.on), el => el.child(iconButton("hlf-open", "external", OPEN_LABEL[appWindow()?.platform] ?? "Open in file manager",
           () => openDefault(root, null).catch(e => notify({ title: "Could not open the folder", body: String(e?.message ?? e), level: "error" })), t))))

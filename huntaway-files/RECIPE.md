@@ -10,13 +10,16 @@ where code, Markdown and images display and text files can be edited and saved.
 
 The panel:
 - A header: an open-folder icon, the folder's name with its Git branch in a small chip, the parent
-  path under it, then two buttons: refresh (a spinner while loading) and open the folder in the
-  system's file manager.
+  path under it, then three buttons: refresh (a spinner while loading), hidden items (a crossed
+  eye while they are hidden, an open eye while they show) and open the folder in the system's
+  file manager.
 - A search field ("Search files").
 - The tree, 26 px rows: folders first, then files, sorted by name with numbers in order. File
   icons are colored by type (code, config, text, image, archive). Git marks sit on the right:
   modified, added, deleted, renamed, untracked, conflict; ignored files are dimmed.
-  `.git`, `.DS_Store`, `Thumbs.db` and `desktop.ini` are never shown.
+  `.git`, `.DS_Store`, `Thumbs.db` and `desktop.ini` are never shown. Hidden items (names that
+  start with `.` or `$`, and `System Volume Information`) show with muted names while the eye is
+  open, and are left out while it is crossed.
 - Right-click menu:
   - a file: Open, Open with its app, Show in File Explorer (Finder on macOS), Copy path,
     Copy relative path, Rename…, Delete…
@@ -52,10 +55,16 @@ A file tab (one per file; opening it again shows the same tab):
 
 - The tree follows the focused terminal's folder (in another machine's terminal, that machine's
   files) and refreshes itself when files change; F5 or the button refreshes by hand.
-- Expanded folders are remembered per root.
+- Expanded folders are remembered per root. Hidden items show at first; hiding them is remembered
+  for every folder.
 - Keys in the tree: arrows, Page Up/Down, Home/End, Enter (open), Left/Right (fold), F2 (rename),
-  Delete, `Ctrl+F` (search), Esc (clear the search), `Ctrl+C` (copy the path).
-- Search matches file names under the root, using `git ls-files` when the folder is a repo.
+  Delete, `Ctrl+F` (search), Esc (clear the search), `Ctrl+C` (copy the path),
+  `Ctrl+Shift+.` (`Cmd+Shift+.`, as in Finder: show or hide hidden items).
+- Search matches file names under the root, using `git ls-files` when the folder is a repo. While
+  hidden items are hidden, files inside them are left out too, unless a word starts with `.`
+  (`.env` finds `.env`).
+- Windows' hidden attribute isn't read (home is read in-process, which doesn't report it), so
+  `AppData` or `NTUSER.DAT` in home still show.
 - In the huntaway layout the panel is frosted glass; anywhere else it is solid.
 
 ## Built from
