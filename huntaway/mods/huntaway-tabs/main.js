@@ -213,12 +213,14 @@ export default class Tabs extends View {
     // in the most urgent status's color (blocked over done).
     const waiting = this.inbox ? waitingAgents() : [];
     const top = waiting[0];
-    // The inbox opens under the right card, flush with its right edge, as its own card.
+    // The inbox opens under the right card, flush with its right edge, as its own card, sliding
+    // down from the bar (props.edge: where it comes from; props.height: the inbox's own sum).
     const INBOX_W = 340;
     const openInbox = () => {
       const b = this.actionsAt;
       const at = b ? { x: Math.max(8, b.x + b.width - INBOX_W), y: b.y + b.height + 8 } : undefined;
-      openOverlay({ mod: INBOX, kind: "popup", frame: "none", width: INBOX_W, height: 40 + (waiting.length ? Math.min(388, 12 + waiting.length * 48) : 104), ...(at ? { at } : {}) });
+      const height = 40 + (waiting.length ? Math.min(388, 12 + waiting.length * 48) : 104);
+      openOverlay({ mod: INBOX, kind: "popup", frame: "none", width: INBOX_W, height, props: { edge: "top", height }, ...(at ? { at } : {}) });
     };
     const alertBell = () => {
       const color = t[top.status];

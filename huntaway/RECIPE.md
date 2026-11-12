@@ -56,10 +56,10 @@ Right of that, the work column:
 - **Status bar** card, 32 px: machine, branch (its icon in `accent`), agent count with a dot in
   the most urgent color, and the command palette key.
 
-The bell's popup ("Waiting on you") is a 340 px card under the right-hand card: one row per agent
-that is blocked or done, blocked first, with the program's icon, its title, its space and how
-long ago, and a `Needs you` or `Done` pill. Clicking a row focuses that agent. Empty, it says
-"All caught up".
+The bell's popup ("Waiting on you") is a 340 px card under the right-hand card, sliding down from
+it (a 300 ms spring) as it fades in: one row per agent that is blocked or done, blocked first, with
+the program's icon, its title, its space and how long ago, and a `Needs you` or `Done` pill.
+Clicking a row focuses that agent. Empty, it says "All caught up".
 
 ## How it behaves
 
@@ -98,7 +98,9 @@ long ago, and a `Needs you` or `Done` pill. Clicking a row focuses that agent. E
     (`transition`), the breathing blocked tab (`loop`), the right-hand card, per-space panel memory.
     It shows the bell only while `mods/huntaway-inbox/mod.json` exists (`readTextFile`,
     `watchFolder` on `mods/`).
-  - `huntaway-inbox`: the bell's popup, opened with `frame: "none"` under the right-hand card.
+  - `huntaway-inbox`: the bell's popup, opened with `frame: "none"` under the right-hand card and
+    `props: { edge: "top", height }` (where it slides in from; its height, the same sum both mods
+    use). In other layouts it is also a floating bell of its own: see its folder in this repository.
   - `huntaway-pane` (clone of `pane`): rounded header, tab name for mod panes, dimmed when unfocused.
   - `huntaway-status` (clone of `workspace-status`), `huntaway-changes` (clone of `changes`):
     cards with the glass fill.
