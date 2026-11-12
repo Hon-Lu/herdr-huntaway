@@ -50,6 +50,7 @@ Made for Windows and macOS. Linux should work but is untested.
 - Click it: the list slides out beside it, blocked agents first. Click one to go there; click the bell again, outside the list, or `Esc` to close it.
 - Drag the bell to any edge or corner. Herdr remembers where you left it.
 - `Ctrl+Shift+I` jumps to the agent at the top of the list.
+- Rather have the bell in the tab bar, as on the right? That's the [huntaway](#huntaway) layout: it comes with this mod.
 
 ## Install
 
