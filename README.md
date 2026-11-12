@@ -8,7 +8,7 @@ A layout and three mods for [Herdr App](https://herdr.dev). Take the whole layou
 | --- | --- |
 | [**huntaway**](huntaway) | The layout. Every panel is a frosted card on a soft wallpaper, agents are listed under their space, and a bell tells you when one needs you. Includes all three mods below. |
 | [**huntaway-files**](huntaway-files) | A fast Files panel. Click a file to open it in its own tab: code, Markdown, images, and simple editing. |
-| [**huntaway-newspace**](huntaway-newspace) | A New space dialog. Search every folder in your home, or type a path to browse, then start a space there. |
+| [**huntaway-newspace**](huntaway-newspace) | A New space dialog. Browse from any path folder by folder, or search folders by name, then start a space there. |
 | [**huntaway-inbox**](huntaway-inbox) | A bell on the edge of any layout. It lights up when agents are waiting on you; click it to see them all and jump to one. |
 
 Made for Windows and macOS. Linux should work but is untested.
@@ -38,9 +38,12 @@ Made for Windows and macOS. Linux should work but is untested.
 
 ![huntaway-newspace](huntaway-newspace/preview.png)
 
-- Type a few letters to find any folder under your home.
-- Type a path like `~\Desktop\` or `D:\` to browse it. `Tab` opens a folder, `Backspace` goes up.
-- `Enter` starts a new space with a terminal in that folder.
+- Opened empty, it lists the folders your terminals are in, your home and your drives.
+- Type a path like `C:\` or `~\Desktop\` to see the folders inside. `Up`/`Down` put the highlighted
+  folder in the field, `Tab` goes into it, `Shift+Tab` goes up.
+- Type a few letters to find a folder under your home or near the spaces you have open.
+- `Enter` or Create starts a new space with a terminal in the folder shown at the bottom. A click
+  highlights a folder; a double click goes into it.
 
 ## huntaway-inbox
 
