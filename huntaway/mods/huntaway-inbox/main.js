@@ -123,7 +123,9 @@ export default class AgentInbox extends View {
 
   bell() {
     const list = waiting();
-    if (list.length === 0) return div(); // nothing waiting: the float disappears
+    // Always there, so people can find it before anything has waited: with nothing waiting it is a
+    // quiet bell alone (muted, no count, still), and clicking it says "All caught up".
+    const idle = list.length === 0;
     const t = theme();
     const where = placement();
     // A dragged bell leaves its list behind: close it. Clicks wait until the drop has settled, so
@@ -133,25 +135,26 @@ export default class AgentInbox extends View {
     // Upright everywhere but the middle of the top or bottom edge.
     const across = where && !where.vertical && where.align === "center";
     const open = shared(OPEN) != null;
-    const color = open ? t.accent : t[list[0].status];
+    const color = open ? t.accent : idle ? t.muted : t[list[0].status];
     // Only the glyph breathes: a fill would be a second rounded shape inside Herdr's frame. While
     // the list is open the bell holds still, in accent on an accent tint.
-    const period = list[0].status === "blocked" ? 2000 : 2600;
+    const breathe = !open && !idle;
+    const period = list[0]?.status === "blocked" ? 2000 : 2600;
     const glyph = svg("mods/huntaway-inbox/bell.svg").size(14).text_color(color);
     return (across ? h_flex().h(22).px(6).gap(4) : v_flex().w(22).py(5).gap(3))
       .id("inbox-bell").items_center().justify_center().rounded(7).cursor_pointer()
       .text_color(open ? t.accent : t.foreground)
       .when(open, (el) => el.bg(t.accent + "26"))
       .when(!open, (el) => el.hover((s) => s.bg(t.hover)))
-      .tooltip(`${list.length} waiting on you · drag to move`)
+      .tooltip(`${idle ? "Nothing waiting" : `${list.length} waiting on you`} · drag to move`)
       .on_mouse_move((e) => { if (e.bounds) this.at = e.bounds; })
       .on_click((e) => {
         if (e?.bounds) this.at = e.bounds;
         if (placement()?.dragging || Date.now() < (this.settleUntil ?? 0)) return;
         this.toggle();
       })
-      .child(open ? glyph : glyph.loop("opacity", { from: 0.35, to: 1, period, easing: "ease-in-out" }))
-      .child(div().text_size(11).font_semibold().child(list.length > 99 ? "99+" : String(list.length)));
+      .child(breathe ? glyph.loop("opacity", { from: 0.35, to: 1, period, easing: "ease-in-out" }) : glyph)
+      .when(!idle, (el) => el.child(div().text_size(11).font_semibold().child(list.length > 99 ? "99+" : String(list.length))));
   }
 
   // ---- The list (popup) ----

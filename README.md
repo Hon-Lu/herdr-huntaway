@@ -9,7 +9,7 @@ A layout and three mods for [Herdr App](https://herdr.dev). Take the whole layou
 | [**huntaway**](huntaway) | The layout. Every panel is a frosted card on a soft wallpaper, agents are listed under their space, and a bell tells you when one needs you. Includes all three mods below. |
 | [**huntaway-files**](huntaway-files) | A fast Files panel. Click a file to open it in its own tab: code, Markdown, images, and simple editing. |
 | [**huntaway-newspace**](huntaway-newspace) | A New space dialog. Search every folder in your home, or type a path to browse, then start a space there. |
-| [**huntaway-inbox**](huntaway-inbox) | A bell on the edge of any layout. It shows up when agents are waiting on you; click it to see them all and jump to one. |
+| [**huntaway-inbox**](huntaway-inbox) | A bell on the edge of any layout. It lights up when agents are waiting on you; click it to see them all and jump to one. |
 
 Made for Windows and macOS. Linux should work but is untested.
 
@@ -46,7 +46,7 @@ Made for Windows and macOS. Linux should work but is untested.
 
 ![huntaway-inbox](huntaway-inbox/preview.png)
 
-- A small bell floats on the edge of your layout, only while an agent needs you or has finished. It breathes in the most urgent color and shows how many.
+- A small bell floats on the edge of your layout. When an agent needs you or has finished, it breathes in the most urgent color and shows how many.
 - Click it: the list slides out beside it, blocked agents first. Click one to go there; click the bell again, outside the list, or `Esc` to close it.
 - Drag the bell to any edge or corner. Herdr remembers where you left it.
 - `Ctrl+Shift+I` jumps to the agent at the top of the list.

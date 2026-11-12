@@ -1,8 +1,8 @@
 # Huntaway Inbox
 
-A small bell on the edge of the window that shows up when agents are waiting on you: it breathes
-in the most urgent agent's color and shows how many. Click it and a list slides out beside it with
-every agent that needs you or has finished, blocked first; click one to go there.
+A small bell on the edge of the window. It sits there quietly, and when agents are waiting on you
+it breathes in the most urgent agent's color and shows how many. Click it and a list slides out
+beside it with every agent that needs you or has finished, blocked first; click one to go there.
 
 ![Huntaway Inbox](preview.png)
 
@@ -16,12 +16,14 @@ In huntaway, skip this: its tab bar already has the bell.
 
 ## What you see
 
-- Nothing, while no agent is blocked or done.
-- Otherwise a bell in Herdr's floating frame, 12 px in from the edge it sits on (top right at
-  first): a 22 px wide column with a 14 px bell glyph over the count (11 px, semibold; `99+` past
-  99). In the middle of the top or bottom edge the two sit side by side instead (22 px tall).
-  The glyph is in the `blocked` color when any agent is blocked, else the `done` color, and
-  breathes (opacity 0.35 to 1, every 2 s when blocked, 2.6 s when only done). The tooltip says
+- A bell in Herdr's floating frame, always there, 12 px in from the edge it sits on (top right
+  at first), so people find it before anything has waited.
+- With no agent blocked or done: the 14 px bell glyph alone in `muted`, still, in a 22 px wide
+  column. The tooltip says "Nothing waiting · drag to move".
+- With agents waiting: the glyph over the count (11 px, semibold; `99+` past 99). In the middle
+  of the top or bottom edge the two sit side by side instead (22 px tall). The glyph is in the
+  `blocked` color when any agent is blocked, else the `done` color, and breathes (opacity 0.35
+  to 1, every 2 s when blocked, 2.6 s when only done). The tooltip says
   "N waiting on you · drag to move".
 - While the list is open the bell holds still in `accent`, on an `accent` tint (15%).
 - The list ("Waiting on you") is a 340 px card, 10 px from the bell, with 14 px corners, a 1 px
@@ -34,7 +36,8 @@ In huntaway, skip this: its tab bar already has the bell.
 
 - Agents come from Herdr: blocked ("Needs you") first, then done (finished while you weren't
   looking); newest first within each. A done agent drops off once you look at it, a blocked one
-  once it's answered, and the bell goes when the list is empty.
+  once it's answered; with the list empty the bell goes quiet, and clicking it says
+  "All caught up".
 - Clicking the bell opens the list toward the middle of the window: left of the bell on the right
   edge, right of it on the left edge, below or above it in the middle of the top or bottom edge.
   Along the edge it lines up with the bell (top, middle or bottom). The list slides out from the
@@ -82,8 +85,9 @@ In huntaway, skip this: its tab bar already has the bell.
 ## Done when
 
 - `herdr-app check mods/huntaway-inbox` passes.
-- With no agent waiting, the layout shows no bell. An agent reporting `blocked` brings it up at
-  the top right with `1`, breathing in the `blocked` color.
+- With no agent waiting, a muted bell without a count sits at the top right; clicking it shows
+  "All caught up". An agent reporting `blocked` turns it into `1`, breathing in the `blocked`
+  color.
 - Clicking it slides the list out to its left with that agent; clicking the row focuses its pane
   and closes the list; clicking the bell twice opens and closes it.
 - Dragged to the top-middle, the bell lies across and the list opens below it.
