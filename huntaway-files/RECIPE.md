@@ -9,8 +9,10 @@ where code, Markdown and images display and text files can be edited and saved.
 ## What you see
 
 The panel:
-- A header: an open-folder icon, the folder's name with its Git branch in a small chip, the parent
-  path under it, then three buttons: refresh (a spinner while loading), hidden items (a crossed
+- A header, 50 px: an open-folder icon; the folder's name (13 px, 17 px line) and right under it,
+  dim (11 px, 14 px line), the machine's name when it's another machine's folder and the Git
+  branch, joined by " · ", each line cut short with "…" (with neither, the name alone, centered);
+  the full path and branch are the tooltip. Then three buttons: refresh (a spinner while loading), hidden items (a crossed
   eye while they are hidden, an open eye while they show) and open the folder in the system's
   file manager.
 - A search field ("Search files").
@@ -71,6 +73,7 @@ A file tab (one per file; opening it again shows the same tab):
   terminal nor a way to type into one, so it goes through the clipboard and `terminal.paste`;
   the clipboard's text comes back 0.6 s later (an image on it is lost). The menu hands it to the
   panel through `huntaway-files.request`, since the menu closes at once.
+- `line_height` takes a bare number as a multiplier: give pixels as a string (`"17px"`).
 - The menu's Open with its app goes to the panel the same way: on Windows it waits on cmd's
   `if exist` before starting Explorer, and a closing menu would drop that second step.
 - A row's click (`on_item_click`) carries no keys: Alt is read from the press, which reaches the

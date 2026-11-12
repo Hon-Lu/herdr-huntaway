@@ -3,7 +3,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, run, window as appWindow } from "herdr";
-import { norm, join, dirname, basename, key, contains, relative, display, friendly, homeDir, compareEntries, isRoot, isWindows } from "./paths.js";
+import { norm, join, dirname, basename, key, contains, relative, display, homeDir, compareEntries, isRoot, isWindows } from "./paths.js";
 import { listFolders, fileIndex, rank, gitTop, gitBranch, gitStatus, openDefault, MAX_PER_FOLDER } from "./system.js";
 import { openInTab } from "./open.js";
 import { menuHeight } from "./menu.js";
@@ -441,15 +441,18 @@ export class Panel {
     const ctx = this.ctx, root = ctx?.root;
     const loading = Boolean([...this.dirs.values()].some(d => d.loading) || this.gitBusy || (this.spinUntil && Date.now() < this.spinUntil));
     const name = root ? (isRoot(root) ? display(root, ctx.on) : basename(root)) : "Files";
-    const where = root && !isRoot(root) ? (ctx.on ? `${ctx.on}: ` : "") + display(friendly(dirname(root), ctx.on), ctx.on) : "";
+    // The name, and under it, dim, the machine (another one's folder) and the Git branch, each
+    // line the full width; neither when there's nothing to say. Tight line heights keep the two
+    // together, and 50 px leaves about 10 px above and below them. The full path is the tooltip
+    // (the terminal's own header shows it too).
+    const under = [ctx?.on, this.git?.branch].filter(Boolean).join(" · ");
     return v_flex().flex_none().border_b(1).border_color(t.border)
-      .child(h_flex().h(44).px(10).gap(6).items_center()
+      .child(h_flex().h(50).px(10).gap(8).items_center()
         .child(svg(icon("folder-open")).size(16).flex_none().text_color(t.accent))
-        .child(v_flex().id("hlf-root").flex_1().min_w(0).tooltip(root ? display(root, ctx.on) : "")
-          .child(h_flex().gap(6).items_center().min_w(0)
-            .child(div().min_w(0).truncate().font_semibold().text_size(13).child(name))
-            .when(Boolean(this.git?.branch), el => el.child(div().flex_none().max_w(120).truncate().px(5).rounded(4).bg(t.raised).text_size(10.5).text_color(t.muted).child(this.git.branch))))
-          .when(Boolean(where), el => el.child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child(where))))
+        .child(v_flex().id("hlf-root").flex_1().min_w(0)
+          .tooltip(root ? (ctx.on ? `${ctx.on}: ` : "") + display(root, ctx.on) + (this.git?.branch ? `\n${this.git.branch}` : "") : "")
+          .child(div().min_w(0).truncate().font_semibold().text_size(13).line_height("17px").child(name))
+          .when(Boolean(under), el => el.child(div().min_w(0).truncate().text_size(11).line_height("14px").text_color(t.muted).child(under))))
         .child(h_flex().id("hlf-refresh").size(24).flex_none().items_center().justify_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover)).tooltip("Refresh (F5)")
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.refresh(cx))
           .child(loading ? svg(icon("spinner")).size(14).text_color(t.muted).spin(800) : svg(icon("refresh")).size(14).text_color(t.muted)))
