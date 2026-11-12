@@ -74,8 +74,11 @@ A file tab (one per file; opening it again shows the same tab):
   UTF-16 (`cmd /u`) to a file in `.cache/huntaway-files/` and read back as bytes; PowerShell
   (about 2 s) only for a folder cmd can't read or whose path has cmd's symbols in it; `sh` on
   macOS, Linux and other machines.
-- Programs it runs: `git` (status, branch, file list), PowerShell or `sh`, `explorer.exe` /
-  `open` / `xdg-open`.
+- Programs it runs: `git` (status, branch, file list), cmd, PowerShell or `sh`, `explorer.exe` /
+  `open` / `xdg-open`. On Windows, "Open with its app" and the folder button use `explorer.exe`
+  (after cmd's `if exist`, since Explorer opens Documents for a missing path) and links use
+  `rundll32 url.dll,FileProtocolHandler`: at once, where PowerShell took two seconds. A path with
+  a comma or cmd's symbols, or a link with spaces, still goes through PowerShell.
 
 ## Watch out
 

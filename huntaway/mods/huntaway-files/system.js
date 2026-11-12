@@ -586,16 +586,30 @@ export async function reveal(path, on) {
   await sh('xdg-open "$(dirname -- "$1")"', [path]);
 }
 
+// On Windows, explorer.exe and rundll32 open at once where PowerShell takes two seconds. Explorer
+// opens Documents for a path that doesn't exist and splits its arguments at commas, so the path
+// is checked with cmd first; one with a comma or cmd's symbols is left to PowerShell.
 export async function openDefault(path, on) {
   if (on) throw new Error("Only files on this computer can be opened with their app");
-  if (isWindows()) { await powershell(`Invoke-Item -LiteralPath ${psq(display(path, null))}`); return; }
+  if (isWindows()) {
+    const p = display(path, null);
+    if (/[,&|<>^%!()"]/.test(p)) { await powershell(`Invoke-Item -LiteralPath ${psq(p)}`); return; }
+    const there = await exec("cmd", ["/d", "/c", "if", "exist", p, "(", "exit", "0", ")", "else", "(", "exit", "2", ")"], { timeout: 8000 });
+    if (there.code !== 0) throw new Error("It no longer exists");
+    await exec("explorer.exe", [p]); // explorer exits 1 even on success
+    return;
+  }
   if (isMac()) { await sh('open -- "$1"', [path]); return; }
   await sh('xdg-open "$1" >/dev/null 2>&1 &', [path]);
 }
 
 export async function openUrl(url) {
   if (!/^(https?|mailto):/i.test(url)) return;
-  if (isWindows()) await powershell(`Start-Process ${psq(url)}`);
+  // rundll32 hands the URL to its default app; one with spaces or quotes goes to PowerShell.
+  if (isWindows()) {
+    if (/^[\x21-\x7e]+$/.test(url) && !url.includes('"')) await exec("rundll32", ["url.dll,FileProtocolHandler", url], { timeout: 8000 });
+    else await powershell(`Start-Process ${psq(url)}`);
+  }
   else if (isMac()) await sh('open "$1"', [url]);
   else await sh('xdg-open "$1" >/dev/null 2>&1 &', [url]);
 }
