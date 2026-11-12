@@ -2,8 +2,8 @@
 // marks and live refresh. Files open in a tab of their own.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
-import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, window as appWindow } from "herdr";
-import { norm, join, dirname, basename, key, contains, relative, display, friendly, homeDir, compareEntries, isRoot } from "./paths.js";
+import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, run, window as appWindow } from "herdr";
+import { norm, join, dirname, basename, key, contains, relative, display, friendly, homeDir, compareEntries, isRoot, isWindows } from "./paths.js";
 import { listFolders, fileIndex, rank, gitTop, gitBranch, gitStatus, openDefault, MAX_PER_FOLDER } from "./system.js";
 import { openInTab } from "./open.js";
 import { menuHeight } from "./menu.js";
@@ -18,6 +18,12 @@ const NOISE = new Set([".git", ".DS_Store", "Thumbs.db", "desktop.ini"]);
 // reader doesn't report it, and asking cmd for it would slow every folder in home.
 const isHidden = name => name.startsWith(".") || name.startsWith("$") || name.toLowerCase() === "system volume information";
 const hiddenPath = rel => rel.split("/").some(isHidden);
+
+/** A path quoted the way Herdr quotes a file dropped on a terminal: always, in single quotes. A
+ *  quote inside is doubled on Windows (PowerShell) and written '\'' elsewhere (sh). */
+function quoted(p) {
+  return isWindows() ? `'${p.replace(/'/g, "''")}'` : `'${p.replace(/'/g, `'\\''`)}'`;
+}
 const PRIORITY = { C: 6, D: 5, M: 4, R: 3, A: 2, U: 1 };
 
 function read(name, fallback) { try { const v = localStorage.getItem(name); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } }
@@ -299,6 +305,26 @@ export class Panel {
     return files.filter(rel => !hiddenPath(rel));
   }
 
+  /**
+   * Puts a path where the focused terminal is typing, as dropping a file there would, without
+   * pressing Enter: relative to the terminal's folder when inside it. Mods can't drag into a
+   * terminal or type into one, so it goes through the clipboard and `terminal.paste`; the text
+   * that was on the clipboard comes back after (an image on it can't).
+   */
+  insert(path, on, cx) {
+    const f = focused();
+    if (!f?.terminal) { notify({ title: "No terminal to insert into", body: "Click a terminal first, then try again.", level: "error" }); return; }
+    const cwd = f.cwd ? norm(f.cwd) : null;
+    const inside = cwd && key(cwd, on) !== key(path, on) && contains(cwd, path, on);
+    const text = quoted(display(inside ? relative(cwd, path, on) : path, on));
+    const before = cx.read_from_clipboard();
+    cx.write_to_clipboard(text);
+    run("terminal.paste");
+    // Back to the terminal, to keep typing after the path.
+    run("pane.focus", f.pane ? { pane: f.pane } : { terminal: f.terminal });
+    if (before !== undefined) cx.timer.after(600, cx => { if (cx.read_from_clipboard() === text) cx.write_to_clipboard(before); });
+  }
+
   /** Show or hide hidden items, remembered for every folder. */
   toggleHidden(cx) {
     this.showHidden = !this.showHidden;
@@ -330,6 +356,13 @@ export class Panel {
     const r = shared(REQUEST);
     if (!r || r.n === this.lastRequest) return;
     this.lastRequest = r.n;
+    // The menu's Insert into terminal and Open with its app: done here, since the menu closes at
+    // once and would drop what is still waiting (the clipboard's return, cmd's check).
+    if (r.action === "insert") { this.insert(r.path, r.on ?? null, cx); return; }
+    if (r.action === "open-default") {
+      openDefault(r.path, r.on ?? null).catch(e => notify({ title: "Could not open", body: String(e?.message ?? e), level: "error" }));
+      return;
+    }
     const ctx = this.ctx;
     if (!ctx || r.action !== "changed" || key(r.root, r.on) !== key(ctx.root, ctx.on)) return;
     const dirs = (r.dirs ?? []).filter(d => d === ctx.root || this.open.has(d));
@@ -362,8 +395,7 @@ export class Panel {
         if (row?.kind === "dir" && row.open) this.toggle(row.path, cx, false);
         else if (row && ctx && !this.query && key(dirname(row.path), ctx.on) !== key(ctx.root, ctx.on)) { this.sel = dirname(row.path); this.pendingScroll = this.sel; this.changed(); }
         break;
-      case "enter": if (row) this.activate(row, cx); break;
-      case "f2": if (row) this.dialog("rename", row); break;
+      case "enter": if (row) this.activate(row, cx); break;      case "f2": if (row) this.dialog("rename", row); break;
       case "delete": if (row) this.dialog("delete", row); break;
       case "f5": this.refresh(cx); break;
       case "ctrl-f": case "cmd-f": this.search.focus(); break;
@@ -448,6 +480,9 @@ export class Panel {
       .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
       .child(this.header(t))
       .child(div().relative().flex_1().min_h(0).px(4).pt(2)
+        // A row's click doesn't carry its keys: the press, which reaches here first, says whether
+        // Alt (Option) was held, and then the click inserts the path instead of opening it.
+        .on_mouse_down("left", e => { this.altPress = Boolean(e.modifiers?.alt); })
         .on_mouse_down("right", () => {
           if (this.itemMenu) { this.itemMenu = false; return; }
           if (this.ctx) this.menu(this.entryTarget(this.ctx.root, true));
@@ -456,7 +491,12 @@ export class Panel {
           this.range = range;
           return rows.slice(range.start, range.end).map(r => this.rowElement(r, t));
         }).size_full().track_scroll(this.scroll)
-          .on_item_click((k, cx) => { const r = this.rows().find(r => r.key === k); this.handle.focus(); if (r) this.activate(r, cx); })
+          .on_item_click((k, cx) => {
+            const r = this.rows().find(r => r.key === k), alt = this.altPress;
+            this.altPress = false;
+            if (alt && r && r.kind !== "status") { this.sel = r.path; this.changed(); this.insert(r.path, this.ctx?.on ?? null, cx); cx.notify(); return; }
+            this.handle.focus(); if (r) this.activate(r, cx);
+          })
           .on_item_secondary_click((k, _e, cx) => {
             const r = this.rows().find(r => r.key === k);
             if (!r || r.kind === "status") return;

@@ -21,11 +21,11 @@ The panel:
   start with `.` or `$`, and `System Volume Information`) show with muted names while the eye is
   open, and are left out while it is crossed.
 - Right-click menu:
-  - a file: Open, Open with its app, Show in File Explorer (Finder on macOS), Copy path,
+  - a file: Open, Open with its app, Insert into terminal, Show in File Explorer (Finder on
+    macOS), Copy path, Copy relative path, Rename…, Delete…
+  - a folder: New file…, New folder…, Insert into terminal, Show in File Explorer, Copy path,
     Copy relative path, Rename…, Delete…
-  - a folder: New file…, New folder…, Show in File Explorer, Copy path, Copy relative path,
-    Rename…, Delete…
-  - empty space: New file…, New folder…, Show in File Explorer, Copy path.
+  - empty space: New file…, New folder…, Insert into terminal, Show in File Explorer, Copy path.
 - Rename and New open a small dialog with the name selected (without its extension); Delete asks
   first and moves the item to the Recycle Bin (Windows) or Trash (macOS, Linux).
 
@@ -63,6 +63,18 @@ A file tab (one per file; opening it again shows the same tab):
 - Search matches file names under the root, using `git ls-files` when the folder is a repo. While
   hidden items are hidden, files inside them are left out too, unless a word starts with `.`
   (`.env` finds `.env`).
+- Insert into terminal (the menu item, which shows "Alt+Click" / "⌥ Click" dim on its right, or
+  `Alt`/`Option` + click on a row) puts the path where the focused terminal is typing, the way
+  dropping a file there would, without pressing Enter: relative to the terminal's folder when
+  inside it, always in single quotes as Herdr quotes a dropped file (whatever the program),
+  nothing after it; then the terminal has the keyboard again. Herdr gives mods no drag into a
+  terminal nor a way to type into one, so it goes through the clipboard and `terminal.paste`;
+  the clipboard's text comes back 0.6 s later (an image on it is lost). The menu hands it to the
+  panel through `huntaway-files.request`, since the menu closes at once.
+- The menu's Open with its app goes to the panel the same way: on Windows it waits on cmd's
+  `if exist` before starting Explorer, and a closing menu would drop that second step.
+- A row's click (`on_item_click`) carries no keys: Alt is read from the press, which reaches the
+  element around the list first.
 - Windows' hidden attribute isn't read (home is read in-process, which doesn't report it), so
   `AppData` or `NTUSER.DAT` in home still show.
 - In the huntaway layout the panel is frosted glass; anywhere else it is solid.

@@ -4,7 +4,7 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { props, theme, closeOverlay, openOverlay, setShared, notify, window as appWindow } from "herdr";
 import { join, dirname, basename, display, relative, validName, isWindows } from "./paths.js";
-import { createFile, createFolder, rename, remove, reveal, openDefault } from "./system.js";
+import { createFile, createFolder, rename, remove, reveal } from "./system.js";
 import { openInTab } from "./open.js";
 import { MOD, REQUEST } from "./ui.js";
 
@@ -18,6 +18,7 @@ function items(target) {
   if (!target.dir) list.push({ id: "open", label: "Open" });
   if (!target.dir && local) list.push({ id: "default", label: "Open with its app" });
   if (target.dir) list.push({ id: "new-file", label: "New file…" }, { id: "new-folder", label: "New folder…" });
+  list.push({ id: "insert", label: "Insert into terminal", hint: platform === "macos" ? "⌥ Click" : "Alt+Click" });
   if (local) list.push({ id: "reveal", label: revealLabel });
   list.push({ id: "copy", label: "Copy path", group: true });
   if (!target.isRoot) list.push({ id: "copy-rel", label: "Copy relative path" });
@@ -42,8 +43,11 @@ export class Menu {
     const dialog = action => { closeOverlay(overlay); openOverlay({ mod: MOD, kind: "dialog", width: 400, height: action === "delete" ? 176 : 186, props: { role: "dialog", action, target: t } }); };
     switch (item.id) {
       case "open": cx.spawn(async cx => { await openInTab(t.path, t.on, cx); }); break;
-      case "default": openDefault(t.path, t.on).catch(e => fail("Could not open", e)); break;
+      // The panel opens it: on Windows that waits on cmd first, and this menu closes at once.
+      case "default": tell({ action: "open-default", path: t.path, on: t.on }); break;
       case "reveal": reveal(t.path, t.on).catch(e => fail("Could not show the file", e)); break;
+      // The panel inserts it: this menu closes now, and the clipboard is put back a moment later.
+      case "insert": tell({ action: "insert", path: t.path, on: t.on }); break;
       case "copy": cx.write_to_clipboard(display(t.path, t.on)); break;
       case "copy-rel": cx.write_to_clipboard(display(relative(t.root, t.path, t.on), t.on)); break;
       case "new-file": case "new-folder": case "rename": case "delete": dialog(item.id); return;
@@ -71,7 +75,9 @@ export class Menu {
           .when(i === this.at, el => el.bg(t.hover)).hover(s => s.bg(t.hover))
           .text_color(item.danger ? t.ansi1 : t.foreground)
           .on_click((_e, cx) => this.choose(item, cx))
-          .child(div().flex_1().truncate().child(item.label)),
+          .child(div().flex_1().truncate().child(item.label))
+          // The same thing without the menu, dim on the right.
+          .when(Boolean(item.hint), el => el.child(div().flex_none().pl(8).text_size(11).text_color(t.dim).child(item.hint))),
       ]));
   }
 }
