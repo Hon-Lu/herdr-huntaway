@@ -69,8 +69,11 @@ A file tab (one per file; opening it again shows the same tab):
 - Files are opened with `tab.new {name, mod: "huntaway-files", props: {role: "viewer", file, on}}`;
   shared state `huntaway-files.tabs` maps files to their tabs, and `huntaway-files.request` carries
   changes from the menus and dialogs to the panel.
-- Reading folders: `fs/promises` inside home; elsewhere one PowerShell call (Windows) or `sh`
-  (macOS, Linux) lists many folders at once.
+- Reading folders: `fs/promises` inside home; elsewhere one program call lists many folders at
+  once: on this Windows machine cmd's `dir` (about 0.2 s, any language), its output written
+  UTF-16 (`cmd /u`) to a file in `.cache/huntaway-files/` and read back as bytes; PowerShell
+  (about 2 s) only for a folder cmd can't read or whose path has cmd's symbols in it; `sh` on
+  macOS, Linux and other machines.
 - Programs it runs: `git` (status, branch, file list), PowerShell or `sh`, `explorer.exe` /
   `open` / `xdg-open`.
 
@@ -83,7 +86,11 @@ A file tab (one per file; opening it again shows the same tab):
 
 - Windows PowerShell writes in the console's code page, which turns non-English names into
   garbage; every script sets `[Console]::OutputEncoding` to UTF-8 and is passed with
-  `-EncodedCommand`.
+  `-EncodedCommand`. cmd run by Herdr has no console, so `chcp 65001` does nothing and its
+  stdout garbles such names: `cmd /u` redirected to a file writes UTF-16, read with
+  `fs.readFile` and decoded by hand (await the file's removal, or a closing view leaves it).
+- In one cmd line, `if … ( … ) else …` takes in everything after it on the line: wrap the whole
+  `if` in parentheses before chaining the next folder with `&`.
 - `image()` only loads paths under the Herdr folder: previews are copied into
   `.cache/huntaway-files/` first and removed later.
 - Use `v_virtual_list` for the tree (`uniform_list` ignores `track_scroll`).

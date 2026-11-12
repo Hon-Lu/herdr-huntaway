@@ -3,7 +3,9 @@
 // Speed: folders in the home folder are read in-process with fs/promises
 // (a millisecond or two, no process). Anything else (another drive, a remote
 // machine) is listed by one program call for every folder that needs it, so
-// expanding or refreshing never starts one process per folder.
+// expanding or refreshing never starts one process per folder. On this
+// Windows machine that call is cmd (a fifth of a second), with PowerShell
+// (two seconds) only for what cmd can't read or spell.
 //
 // Encoding: Windows PowerShell writes in the console code page (CP950 on a
 // Traditional Chinese system), while exec decodes UTF-8, which turns Chinese
@@ -111,9 +113,82 @@ function parseShell(text, out) {
   }
 }
 
+// cmd's `dir` starts in a fifth of a second where PowerShell takes two, so this machine's folders
+// outside home go to cmd first. Per folder it prints a header, `::K` when the folder can be read,
+// its folders, `::F`, its files; `::X` when it doesn't exist (`:` can't be in a name). Each path
+// is its own argument (quoted when it has spaces); one with cmd's own symbols goes to PowerShell,
+// and so does one cmd can't read (PowerShell has the reason).
+// Run by Herdr, cmd has no console and would write names in the system code page (Chinese ones
+// arrive garbled), so its output goes UTF-16 (`/u`) into a file in the cache, read back as bytes.
+const CMD_UNSAFE = /[&|<>^%!()",;=]/;
+const CMD_LIMIT = 7000; // cmd takes 8191 characters
+let cmdRuns = 0;
+
+const fromUtf16 = bytes => {
+  let s = "";
+  for (let i = 0; i + 1 < bytes.length; i += 4096) {
+    const end = Math.min(bytes.length - 1, i + 4096), codes = [];
+    for (let j = i; j < end; j += 2) codes.push(bytes[j] | (bytes[j + 1] << 8));
+    s += String.fromCharCode(...codes);
+  }
+  return s;
+};
+
+/** What a cmd line prints, in full Unicode; null when it can't run. */
+async function cmdText(args) {
+  const file = `${await cacheDir()}/cmd-${Date.now()}-${++cmdRuns}.txt`;
+  if (CMD_UNSAFE.test(file)) return null;
+  try {
+    await exec("cmd", ["/d", "/u", "/c", "(", ...args, ")", ">", display(file, null)], { timeout: 30000 });
+    return fromUtf16(await fs.readFile(file));
+  } catch { return null; }
+  finally { await fs.unlink(file).catch(() => {}); }
+}
+
+/** Lists what cmd can into `out`; returns the paths left for PowerShell. */
+async function listByCmd(paths, out) {
+  const left = [], todo = [];
+  for (const p of paths) (CMD_UNSAFE.test(display(p, null)) ? left : todo).push(p);
+  for (let i = 0; i < todo.length;) {
+    const batch = [], args = [];
+    let size = 0;
+    while (i < todo.length && (batch.length === 0 || size + todo[i].length * 4 + 120 < CMD_LIMIT)) {
+      const p = todo[i++], d = display(p, null), slash = d.endsWith("\\") ? d : d + "\\";
+      if (batch.length) args.push("&");
+      // The whole `if` in parentheses: an else part takes in the rest of the line, so without
+      // them every folder after this one would run only when this one is missing.
+      args.push("echo", `::D${batch.length}`, "&", "(", "if", "exist", slash,
+        "(", "(", "dir", "/a", d, ">nul", "2>nul", "&&", "echo", "::K", ")",
+        "&", "dir", "/a:d", "/b", d, "2>nul", "&", "echo", "::F", "&", "dir", "/a:-d", "/b", d, "2>nul",
+        ")", "else", "(", "echo", "::X", ")", ")");
+      size += p.length * 4 + 120; batch.push(p);
+    }
+    const text = await cmdText(args);
+    if (text === null) { left.push(...batch); continue; }
+    const found = new Map();
+    let current = null;
+    for (const line of text.split(/\r?\n/)) {
+      const mark = line.trimEnd(), head = /^::D(\d+)$/.exec(mark);
+      if (head) { current = { readable: false, missing: false, files: false, entries: [] }; found.set(Number(head[1]), current); }
+      else if (!current || !line) continue;
+      else if (mark === "::K") current.readable = true;
+      else if (mark === "::X") current.missing = true;
+      else if (mark === "::F") current.files = true;
+      else current.entries.push({ name: line, dir: !current.files });
+    }
+    batch.forEach((p, n) => {
+      const r = found.get(n);
+      if (r?.missing) out.set(norm(p), { entries: [], error: "This folder no longer exists" });
+      else if (r?.readable && r.files) out.set(norm(p), { entries: r.entries });
+      else left.push(p);
+    });
+  }
+  return left;
+}
+
 async function listByProgram(paths, on) {
   const out = new Map();
-  const viaPowerShell = async () => {
+  const viaPowerShell = async paths => {
     // Keep each encoded command well below Windows' 32k command line.
     for (let i = 0; i < paths.length;) {
       const batch = [];
@@ -122,10 +197,12 @@ async function listByProgram(paths, on) {
       parsePowerShell(await powershell(PS_LIST(batch.map(p => display(p, null))), { on }), out);
     }
   };
-  if (localWindows(on)) await viaPowerShell();
-  else {
+  if (localWindows(on)) {
+    const left = await listByCmd(paths, out);
+    if (left.length) await viaPowerShell(left);
+  } else {
     try { parseShell(await sh(SH_LIST, paths, { on }), out); }
-    catch (e) { if (on && noShell(e)) await viaPowerShell(); else throw e; }
+    catch (e) { if (on && noShell(e)) await viaPowerShell(paths); else throw e; }
   }
   // PowerShell reports Windows spelling; map back to the requested paths.
   const result = new Map();
