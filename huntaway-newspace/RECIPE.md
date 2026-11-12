@@ -57,8 +57,9 @@ A 520×454 card in the middle of the window, 16 px corners, the theme's `backgro
 - Open it with `mod.open {name: "huntaway-newspace"}`: from a key (`keys.json` here binds
   `Ctrl+Shift+N` in place of Herdr's `space.new`), the palette, or another mod's button.
 - Listing: `fs/promises` inside home; outside it, `sh` on macOS and Linux, and on Windows cmd's
-  `dir /a:d-h /b` (about 0.2 s), or PowerShell (UTF-8 output, about 2 s) for a folder whose names
-  cmd garbles or whose path has cmd's symbols in it. Drives: cmd's `if exist X:\` per letter.
+  `dir /a:d-h /b` (about 0.2 s, any language), its output written UTF-16 (`cmd /u`) to a file in
+  `.cache/huntaway-newspace/` and read back as bytes; PowerShell (UTF-8 output, about 2 s) only
+  for a path with cmd's symbols in it. Drives: cmd's `if exist X:\` per letter.
   Each folder is read once while the dialog is open, and the highlighted one is read ahead.
   The index walks home with `fs/promises` and the other places with one PowerShell script (or
   `find`) each.
@@ -71,8 +72,9 @@ A 520×454 card in the middle of the window, 16 px corners, the theme's `backgro
 - The list follows what was typed (`query`), not the field: a highlighted row's path in the field
   must not filter the list down to that one row. The field's `change` for that path is ignored.
 - `fs/promises` reads only inside home: anything else goes through cmd, PowerShell or `sh`.
-- cmd run by Herdr has no console, so `chcp 65001` does nothing: its output is in the system code
-  page, which arrives with U+FFFD for non-English names.
+- cmd run by Herdr has no console, so `chcp 65001` does nothing and its stdout garbles
+  non-English names: `cmd /u` redirected to a file writes UTF-16, read with `fs.readFile` and
+  decoded by hand (await the file's removal, or a closing dialog leaves it).
 - A space's `folder` is where new terminals start, not where they are now (empty for home).
 - Terminals may report folders in other letter case; compare paths case-insensitively.
 - The dialog's parts have fixed heights; keep `mod.json`'s overlay height in step

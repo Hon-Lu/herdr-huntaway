@@ -1,7 +1,7 @@
 // Folders for the New space dialog: listing one folder (anywhere, also outside the home
 // folder), the drives, and a background index of folders (under home and near the open spaces)
 // for searching.
-import { exec, home } from "herdr";
+import { exec, home, appHome } from "herdr";
 import * as fs from "fs/promises";
 
 // Forward slashes, no doubled ones, no trailing one (except a lone root).
@@ -33,6 +33,40 @@ async function powershell(script, timeout = 8000) {
   return r.code === 0 ? r.stdout : "";
 }
 
+// --- cmd, with Unicode output. Run by Herdr it has no console and would write names in the
+// system code page (Chinese ones arrive garbled), so its output goes UTF-16 (`/u`) into a file
+// under the Herdr folder, read back as bytes.
+const CMD_UNSAFE = /[&|<>^%!()",;=]/;
+let cmdRuns = 0, swept = false;
+const fromUtf16 = bytes => {
+  let s = "";
+  for (let i = 0; i + 1 < bytes.length; i += 4096) {
+    const end = Math.min(bytes.length - 1, i + 4096), codes = [];
+    for (let j = i; j < end; j += 2) codes.push(bytes[j] | (bytes[j + 1] << 8));
+    s += String.fromCharCode(...codes);
+  }
+  return s;
+};
+/** What a cmd line prints, in full Unicode; null when it can't run. */
+async function cmdText(args) {
+  const dir = norm(appHome()) + "/.cache/huntaway-newspace", file = `${dir}/cmd-${Date.now()}-${++cmdRuns}.txt`;
+  if (CMD_UNSAFE.test(file)) return null;
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    if (!swept) {
+      // Files a closed dialog left behind, an hour old or more.
+      swept = true;
+      for (const name of await fs.readdir(dir).catch(() => [])) {
+        const at = Number(name.split("-")[1]);
+        if (!at || Date.now() - at > 3600e3) await fs.unlink(`${dir}/${name}`).catch(() => {});
+      }
+    }
+    await exec("cmd", ["/d", "/u", "/c", "(", ...args, ")", ">", file.replace(/\//g, "\\")], { timeout: 8000 });
+    return fromUtf16(await fs.readFile(file));
+  } catch { return null; }
+  finally { await fs.unlink(file).catch(() => {}); }
+}
+
 const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
 /** The subfolder names of one folder, hidden ones left out unless asked for. [] when unreadable. */
@@ -48,12 +82,9 @@ export async function listDirs(dir, { hidden = false } = {}) {
       const target = (/^[a-z]:$/i.test(path) ? path + "/" : path).replace(/\//g, "\\");
       // cmd's `dir` starts in a fifth of a second, PowerShell in two. The path goes as its own
       // argument (quoted when it has spaces); one with cmd's own symbols goes to PowerShell.
-      // Without a console cmd writes the system code page, not UTF-8: a name it garbles
-      // (U+FFFD in the output) sends the folder to PowerShell too.
-      if (!/[&|<>^%!()"]/.test(target)) {
-        const r = await exec("cmd", ["/d", "/c", "dir", "/a:d-h", "/b", target], { timeout: 8000 });
-        // A folder with no subfolders ends with code 1 and prints nothing: that is an answer too.
-        if ((r.code === 0 || !r.stdout.trim()) && !r.stdout.includes("�")) return r.stdout.split(/\r?\n/).filter(Boolean).filter(keep).sort(byName);
+      if (!CMD_UNSAFE.test(target)) {
+        const text = await cmdText(["dir", "/a:d-h", "/b", target, "2>nul"]);
+        if (text !== null) return text.split(/\r?\n/).filter(Boolean).filter(keep).sort(byName);
       }
       const out = await powershell(`[IO.DirectoryInfo]::new(${psq(target)}).EnumerateDirectories() | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::Hidden) } | ForEach-Object { $_.Name }`);
       return out.split(/\r?\n/).filter(Boolean).filter(keep).sort(byName);
