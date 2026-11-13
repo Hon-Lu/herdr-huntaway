@@ -7,7 +7,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, spaces, props, run, theme, home, layout } from "herdr";
+import { panes, spaces, props, run, theme, home, layout, notify } from "herdr";
 
 
 // Match the first visible tab frame, including the active child of a stack.
@@ -58,6 +58,35 @@ export default class Pane extends View {
       .child(svg(`mods/huntaway-pane/${icon}.svg`).size(14));
   }
 
+  /**
+   * The terminal's address (`t38`), dim, after the folder: click copies it, for an agent
+   * (`hc read t38`). It stays the same when spaces and tabs are renamed or share a name.
+   */
+  address(t, p, quiet) {
+    if (!p.terminal) return null;
+    const ref = p.terminal;
+    return div()
+      .id(`ph-id-${p.pane}`)
+      .flex_none()
+      .px(5)
+      .h(18)
+      .flex()
+      .items_center()
+      .rounded(5)
+      .text_size(11)
+      .text_color(quiet ? t.dim : t.muted)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip(`Copy terminal address ${ref} for an agent`)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        cx.write_to_clipboard(ref);
+        notify({ title: "Copied", body: ref, level: "success", timeout: 2000 });
+      })
+      .child(p.terminal);
+  }
+
   render(cx) {
     const t = theme();
     const p = this.me();
@@ -88,6 +117,7 @@ export default class Pane extends View {
       .when(Boolean(pic), (el) => el.child(pic))
       .child(div().flex_none().truncate().max_w(260).font_medium().text_color(quiet ? t.dim : t.foreground).child(name))
       .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
+      .when(Boolean(p.terminal), el => el.child(this.address(t, p, quiet)))
       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
       .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))

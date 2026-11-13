@@ -47,7 +47,10 @@ Right of that, the work column:
     and Changes. With agents waiting, the bell becomes a pill with the count, breathing in the
     most urgent status's color.
 - **Panes**: each pane is a card, 12 px apart, with a 30 px header (program icon, name, folder,
-  status; split, zoom and close on hover). In a split tab, the headers of panes without focus are
+  the terminal's address, status; split, zoom and close on hover). The address (`t38`, 11 px,
+  muted, before the status) is what agents call the terminal (`hc read t38`); clicking it copies
+  just the address (it is for the agent, and stays the same when spaces and tabs are renamed or
+  share a name) and shows a "Copied" toast, without focusing the pane. Mod panes have none. In a split tab, the headers of panes without focus are
   dimmed; the focused pane's rim is a little brighter (`#ffffff3d` / `#00000033`). A file tab's
   header shows the file name. Terminal text is inset 16 px top and bottom, 14 px at the sides;
   terminals paint no background (`terminal_opacity: 0`), so the card shows through.
@@ -101,7 +104,8 @@ Clicking a row focuses that agent. Empty, it says "All caught up".
   - `huntaway-inbox`: the bell's popup, opened with `frame: "none"` under the right-hand card and
     `props: { edge: "top", height }` (where it slides in from; its height, the same sum both mods
     use). In other layouts it is also a floating bell of its own: see its folder in this repository.
-  - `huntaway-pane` (clone of `pane`): rounded header, tab name for mod panes, dimmed when unfocused.
+  - `huntaway-pane` (clone of `pane`): rounded header, tab name for mod panes, dimmed when unfocused,
+    the terminal's address that copies itself.
   - `huntaway-status` (clone of `workspace-status`), `huntaway-changes` (clone of `changes`):
     cards with the glass fill.
   - `huntaway-files`, `huntaway-newspace`: see their own folders in this repository.
