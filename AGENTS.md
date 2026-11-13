@@ -9,8 +9,13 @@ files (`gpui-kit.d.ts`, `herdr.d.ts`) beside it are the truth for the mod API.
 - `huntaway/` is the source: the layout and every mod. `huntaway-files/` and `huntaway-newspace/`
   are copies for installing those mods alone. After changing either mod in `huntaway/mods/`, run
   `sync.ps1` so the copies match.
+- `huntaway-custom/` is the person's own setup (huntaway plus other people's mods), not shared on
+  herdr.dev. Never give it a `RECIPE.md` or `preview.png` (herdr.dev would list it), and leave it
+  out of the main README. Other people's mods are pinned in its `mods.json` and fetched by
+  `install.ps1 -Custom`, never copied into the repo. Its layout is a copy of `huntaway.json`:
+  carry huntaway layout changes over by hand.
 - Install by copying `huntaway/mods/*` to `~/.config/herdr-app/mods/` (and the layout files to
-  `layouts/`). Never copy the installed `layouts/huntaway.json` back: `huntaway-chrome` rewrites it
+  `layouts/`), or with `install.ps1`. Never copy the installed `layouts/huntaway.json` back: `huntaway-chrome` rewrites it
   at run time (pane fill, rims, wallpaper per theme).
 - Every change: `herdr-app check <mod folder>` on each changed mod, then `herdr-app status` shows
   no errors.
