@@ -1,18 +1,27 @@
 // The right-click menu and the name / delete dialogs. Both open as overlays
 // of this same mod and report back to the panel through shared state.
-import { div } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { props, theme, closeOverlay, openOverlay, setShared, notify, window as appWindow } from "herdr";
 import { join, dirname, basename, display, relative, validName, isWindows } from "./paths.js";
 import { createFile, createFolder, rename, remove, reveal } from "./system.js";
 import { openInTab } from "./open.js";
-import { MOD, REQUEST } from "./ui.js";
+import { MOD, REQUEST, icon } from "./ui.js";
 
 const tell = request => setShared(REQUEST, { ...request, n: `${Date.now()}-${Math.random()}` });
 const fail = (title, e) => notify({ title, body: String(e?.message ?? e), level: "error" });
 
 function items(target) {
   const local = !target.on, platform = appWindow().platform;
+  // The ⋯ menu beside the search: how the tree shows, not a file. New view options go here, so
+  // the header keeps its two buttons and the folder's name its room.
+  // Each has an icon; an on/off option says what choosing it does, as the old eye button did.
+  if (target.view) return [
+    target.showHidden
+      ? { id: "hidden", icon: "eye-off", label: "Hide hidden items", hint: platform === "macos" ? "⌘⇧." : "Ctrl+Shift+." }
+      : { id: "hidden", icon: "eye", label: "Show hidden items", hint: platform === "macos" ? "⌘⇧." : "Ctrl+Shift+." },
+    { id: "collapse", icon: "chevrons-down-up", label: "Collapse all folders" },
+  ];
   const revealLabel = platform === "macos" ? "Reveal in Finder" : platform === "windows" ? "Show in File Explorer" : "Show in file manager";
   const list = [];
   if (!target.dir) list.push({ id: "open", label: "Open" });
@@ -51,6 +60,7 @@ export class Menu {
       case "copy": cx.write_to_clipboard(display(t.path, t.on)); break;
       case "copy-rel": cx.write_to_clipboard(display(relative(t.root, t.path, t.on), t.on)); break;
       case "new-file": case "new-folder": case "rename": case "delete": dialog(item.id); return;
+      case "hidden": case "collapse": tell({ action: item.id }); break;
     }
     closeOverlay(overlay);
   }
@@ -75,6 +85,7 @@ export class Menu {
           .when(i === this.at, el => el.bg(t.hover)).hover(s => s.bg(t.hover))
           .text_color(item.danger ? t.ansi1 : t.foreground)
           .on_click((_e, cx) => this.choose(item, cx))
+          .when(Boolean(item.icon), el => el.child(svg(icon(item.icon)).size(14).flex_none().mr(9).text_color(t.muted)))
           .child(div().flex_1().truncate().child(item.label))
           // The same thing without the menu, dim on the right.
           .when(Boolean(item.hint), el => el.child(div().flex_none().pl(8).text_size(11).text_color(t.dim).child(item.hint))),

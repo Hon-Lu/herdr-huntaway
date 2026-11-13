@@ -28,12 +28,13 @@ Made for Windows and macOS. Linux should work but is untested.
 ![huntaway-files](huntaway-files/preview.png)
 
 - A file tree that follows your terminal's folder, with search, Git status and a refresh button.
-  The eye button (or `Ctrl+Shift+.`) hides hidden items such as `.vscode` or `.env`.
+  The ⋯ button beside search (or `Ctrl+Shift+.`) hides hidden items such as `.vscode` or `.env`.
 - Icons tell files and folders apart at a glance: code, JSON, settings, scripts, images, `src`,
   `tests`, `docs`, README, LICENSE, `package.json` and more, colored by language.
 - Changed files show the lines added and removed (`+42 −8`). Under the folder name, the branch
   shows how far it is ahead of or behind its upstream (`↑3 ↓1`), and a strip counts what changed
   (modified, new, deleted) with a small colored bar.
+- Each file shows when it last changed; the ⋯ menu also collapses every folder.
 - Put a file's path into the terminal or the agent's prompt: `Alt` + click it, or Insert into
   terminal in its right-click menu.
 - Rename, delete to the Recycle Bin or Trash, show in File Explorer or Finder.

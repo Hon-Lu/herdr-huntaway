@@ -12,9 +12,9 @@ The panel:
 - A header, 50 px: an open-folder icon; the folder's name (13 px, 17 px line) and right under it,
   dim (11 px, 14 px line), the machine's name when it's another machine's folder and the Git
   branch, joined by " · ", each line cut short with "…" (with neither, the name alone, centered);
-  the full path and branch are the tooltip. Then three buttons: refresh (a spinner while loading), hidden items (a crossed
-  eye while they are hidden, an open eye while they show) and open the folder in the system's
-  file manager.
+  the full path and branch are the tooltip. Then only two buttons: refresh (a spinner while
+  loading) and open the folder in the system's file manager. Nothing else goes in the header, so
+  the folder's name keeps its room; other options go in the ⋯ menu.
   After the branch, `↑N` (`ansi6`) and `↓N` (`ansi4`) when it is ahead of or behind its
   upstream; the tooltip adds "main → origin/main (3 ahead)".
 - A change summary, only while the shown folder has changes (the files under it, not the whole
@@ -22,7 +22,14 @@ The panel:
   "1 deleted", "1 conflict", 11 px muted, in the tree's mark colors; the lines added and removed
   (`+144 −65`, `ansi2` / `ansi1`) on the right; under it a 4 px bar split by those counts
   (2 px gaps, rounded, at least 4 px each). A clean folder shows nothing, so nothing to read.
-- A search field ("Search files").
+- A search field ("Search files") and, right of it, a 28 px ⋯ button: a popup in the right-click
+  menu's style, 240 px, each row with a 14 px muted icon:
+  - Hide hidden items (a crossed eye) while they show, Show hidden items (an eye) while they are
+    left out, with `Ctrl+Shift+.` (`⌘⇧.`) dim on the right. It says what choosing it does, as
+    the old eye button did, so it needs no tick.
+  - Collapse all folders (chevrons pointing together).
+  New view options are added here, never as header buttons. The popup reports the choice through
+  `huntaway-files.request`, and the panel acts on it a moment later (it arrives inside render).
 - The tree, 26 px rows: folders first, then files, sorted by name with numbers in order.
   Icons are Lucide line icons (15 px), tinted with theme colors; `fileLook()` in `ui.js` picks
   them:
@@ -42,10 +49,12 @@ The panel:
   Git marks sit on the right: modified, added, deleted, renamed, untracked, conflict; ignored
   files are dimmed. A changed file shows, before its mark, the lines added and removed against
   the last commit (`+42 −8`, 11 px, 85% opacity, only the parts that aren't zero; new and binary
-  files have none).
+  files have none). Files without line counts show when they last changed, 11 px dim on the
+  right: `14:05` today, `Nov 3` this year, `Nov 2025` before. The panel can't know its own
+  width, so the date always shows; folders have none.
   `.git`, `.DS_Store`, `Thumbs.db` and `desktop.ini` are never shown. Hidden items (names that
-  start with `.` or `$`, and `System Volume Information`) show with muted names while the eye is
-  open, and are left out while it is crossed.
+  start with `.` or `$`, and `System Volume Information`) show with muted names until Hide hidden
+  items is chosen, and are left out after that.
 - Right-click menu:
   - a file: Open, Open with its app, Insert into terminal, Show in File Explorer (Finder on
     macOS), Copy path, Copy relative path, Rename…, Delete…
@@ -123,6 +132,10 @@ A file tab (one per file; opening it again shows the same tab):
   UTF-16 (`cmd /u`) to a file in `.cache/huntaway-files/` and read back as bytes; PowerShell
   (about 2 s) only for a folder cmd can't read or whose path has cmd's symbols in it; `sh` on
   macOS, Linux and other machines.
+- Modified times come apart from the listing, which stays fast: Herdr's `fs` has no `stat` and
+  cmd's `dir` writes dates in the system's language, so one PowerShell call on Windows
+  (`LastWriteTimeUtc`) or `stat` (GNU `-c %Y`, BSD `-f %m`) elsewhere reads them for every folder
+  that asked, at most once every 3 s. The names show at once; the dates follow.
 - Programs it runs: `git` (`status --branch` for marks and ahead/behind, `branch --show-current`,
   `diff HEAD --numstat` for line counts, `ls-files` for search), cmd, PowerShell or `sh`, `explorer.exe` /
   `open` / `xdg-open`. On Windows, "Open with its app" and the folder button use `explorer.exe`

@@ -232,6 +232,54 @@ export async function listFolders(paths, on) {
   return result;
 }
 
+// ---- modified times --------------------------------------------------------------
+
+// Herdr's fs has no stat and cmd's `dir` writes dates in the system's language, so times come
+// from PowerShell on Windows and `stat` elsewhere, apart from the listing (which stays fast).
+const PS_TIMES = paths => `foreach ($p in @(${paths.map(psq).join(",")})) {
+  [Console]::Out.Write("D\`t" + $p + "\`n")
+  try {
+    $n = 0
+    foreach ($i in [IO.DirectoryInfo]::new($p).EnumerateFiles()) {
+      if ($n -ge ${MAX_PER_FOLDER}) { break }; $n++
+      [Console]::Out.Write([string][long]($i.LastWriteTimeUtc - [datetime]::new(1970, 1, 1)).TotalMilliseconds + "\`t" + $i.Name + "\`n")
+    }
+  } catch {}
+}`;
+// GNU stat takes -c, BSD stat -f; each folder in a subshell so a failing one doesn't stop the rest.
+const SH_TIMES = `if stat -c %Y . >/dev/null 2>&1; then f='-c %Y000\t%n'; else f='-f %m000\t%N'; fi
+for d in "$@"; do printf 'D\t%s\n' "$d"; (cd "$d" 2>/dev/null || exit; set --
+for p in * .[!.]* ..?*; do [ -f "$p" ] && set -- "$@" "$p"; done
+[ $# -gt 0 ] && stat $f -- "$@") 2>/dev/null; done`;
+
+/**
+ * When the files in these folders were last changed, as Map(folder -> Map(name -> ms since
+ * 1970)). Folders it can't read are left out. One program call for all of them.
+ */
+export async function fileTimes(paths, on) {
+  const out = new Map();
+  let text;
+  try {
+    if (localWindows(on)) text = await powershell(PS_TIMES(paths.map(p => display(p, null))));
+    else {
+      try { text = await sh(SH_TIMES, paths, { on }); }
+      catch (e) { if (on && noShell(e)) text = await powershell(PS_TIMES(paths.map(p => display(p, null))), { on }); else throw e; }
+    }
+  } catch { return out; }
+  let current = null;
+  for (const line of text.split(/\r?\n/)) {
+    const tab = line.indexOf("\t");
+    if (tab < 0) continue;
+    const head = line.slice(0, tab), rest = line.slice(tab + 1);
+    if (head === "D") { current = new Map(); out.set(norm(rest), current); }
+    else if (current && /^\d+$/.test(head)) current.set(rest, Number(head));
+  }
+  // PowerShell reports Windows spelling; map back to the requested paths.
+  const result = new Map();
+  for (const p of paths) { const m = out.get(norm(p)) ?? [...out.entries()].find(([k]) => key(k, on) === key(p, on))?.[1]; if (m) result.set(p, m); }
+  return result;
+}
+
 // ---- search index ------------------------------------------------------------
 
 const SKIP = new Set(["node_modules", ".git", ".hg", ".svn", "dist", "build", "out", "target", ".next", ".nuxt", ".turbo",

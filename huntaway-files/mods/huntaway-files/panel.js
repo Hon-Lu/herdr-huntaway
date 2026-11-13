@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, run, window as appWindow } from "herdr";
 import { norm, join, dirname, basename, key, contains, relative, display, homeDir, compareEntries, isRoot, isWindows } from "./paths.js";
-import { listFolders, fileIndex, rank, gitTop, gitBranch, gitStatus, gitLines, openDefault, MAX_PER_FOLDER } from "./system.js";
+import { listFolders, fileTimes, fileIndex, rank, gitTop, gitBranch, gitStatus, gitLines, openDefault, MAX_PER_FOLDER } from "./system.js";
 import { openInTab } from "./open.js";
 import { menuHeight } from "./menu.js";
 import { MOD, REQUEST, icon, iconButton, glass, rim, fileLook, markColor, MARK_LABEL } from "./ui.js";
@@ -25,6 +25,15 @@ function quoted(p) {
   return isWindows() ? `'${p.replace(/'/g, "''")}'` : `'${p.replace(/'/g, `'\\''`)}'`;
 }
 const PRIORITY = { C: 6, D: 5, M: 4, R: 3, A: 2, U: 1 };
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** When a file changed, short: `14:05` today, `Nov 3` this year, `Nov 2025` before (no Intl here). */
+function when(ms) {
+  const d = new Date(ms), now = new Date();
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate())
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${MONTHS[d.getMonth()]} ${d.getFullYear() === now.getFullYear() ? d.getDate() : d.getFullYear()}`;
+}
 
 function read(name, fallback) { try { const v = localStorage.getItem(name); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } }
 function write(name, value) { try { localStorage.setItem(name, JSON.stringify(value)); } catch {} }
@@ -47,6 +56,7 @@ export class Panel {
     this.handle = handle;
     this.dirs = new Map(); this.open = new Set(); this.sel = null;
     this.git = null; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map(); this.lines = new Map();
+    this.times = new Map();
     this.query = ""; this.results = []; this.index = null;
     this.scroll = VirtualListScrollHandle.new();
     this.range = { start: 0, end: 0 };
@@ -74,6 +84,7 @@ export class Panel {
     this.remember();
     this.ctx = next ? { key: k, root: next.root, on: next.on, space: next.space } : null;
     this.dirs = new Map(); this.sel = null; this.git = null; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map(); this.lines = new Map();
+    this.times = new Map(); this.timesWanted = null;
     this.index = null; this.results = []; this.watchFailed = false; this.changed();
     const saved = next ? read("open", {})[key(next.root, next.on)] : null;
     this.open = new Set((saved ?? []).map(rel => join(next.root, rel)));
@@ -117,7 +128,43 @@ export class Panel {
         this.dirs.set(p, { entries: entries.slice(0, MAX_PER_FOLDER), more: entries.length > MAX_PER_FOLDER, error: v.error ?? null, loading: false });
       }
       this.changed(); cx.notify();
+      this.loadTimes([...result.keys()].filter(p => this.dirs.has(p)), cx);
     });
+  }
+
+  /**
+   * Files' modified times, read apart from the listing (it needs PowerShell or `stat`, which take
+   * a moment), so the names show at once and the dates follow. At most one read every 3 s, for
+   * whatever folders asked meanwhile.
+   */
+  loadTimes(paths, cx) {
+    for (const p of paths) (this.timesWanted ??= new Set()).add(p);
+    if (this.timesBusy || !this.timesWanted?.size) return;
+    this.timesBusy = true;
+    cx.timer.after(Math.max(50, (this.timesAt ?? 0) + 3000 - Date.now()), cx => {
+      const ctx = this.ctx, paths = [...this.timesWanted].filter(p => ctx && (p === ctx.root || this.open.has(p)));
+      this.timesWanted = null;
+      if (!paths.length) { this.timesBusy = false; return; }
+      this.timesAt = Date.now();
+      cx.spawn(async cx => {
+        try {
+          const found = await fileTimes(paths, ctx.on);
+          if (this.ctx === ctx) for (const [p, m] of found) this.times.set(p, m);
+        } catch {} finally {
+          this.timesBusy = false; cx.notify();
+          if (this.timesWanted?.size) this.loadTimes([], cx);
+        }
+      });
+    });
+  }
+
+  /** Closes every folder. */
+  collapseAll(cx) {
+    if (!this.open.size) return;
+    for (const p of this.open) { this.dirs.delete(p); this.times.delete(p); }
+    this.open.clear();
+    if (this.sel && this.ctx && key(dirname(this.sel), this.ctx.on) !== key(this.ctx.root, this.ctx.on)) this.sel = null;
+    this.changed(); this.remember(); cx.notify();
   }
 
   refresh(cx, { quiet = false } = {}) {
@@ -241,7 +288,7 @@ export class Panel {
         if (!list.length && !d.error) out.push({ key: `status:${dir}`, kind: "status", text: depth ? "Empty folder" : "This folder is empty", depth });
         for (const e of list) {
           const path = join(dir, e.name), open = e.dir && this.open.has(path);
-          out.push({ key: path, kind: e.dir ? "dir" : "file", path, name: e.name, depth, dir: e.dir, open });
+          out.push({ key: path, kind: e.dir ? "dir" : "file", path, parent: dir, name: e.name, depth, dir: e.dir, open });
           if (open && depth < 40) walk(path, depth + 1);
         }
         if (d.more) out.push({ key: `status:more:${dir}`, kind: "status", text: `Showing the first ${MAX_PER_FOLDER.toLocaleString()} entries`, depth });
@@ -255,7 +302,7 @@ export class Panel {
   toggle(path, cx, force) {
     const open = force ?? !this.open.has(path);
     if (!open) {
-      for (const p of [...this.open]) if (contains(path, p, this.ctx?.on)) { this.open.delete(p); this.dirs.delete(p); }
+      for (const p of [...this.open]) if (contains(path, p, this.ctx?.on)) { this.open.delete(p); this.dirs.delete(p); this.times.delete(p); }
     } else if (!this.open.has(path)) {
       this.open.add(path);
       if (!this.dirs.has(path)) this.load([path], cx);
@@ -355,6 +402,12 @@ export class Panel {
     openOverlay({ mod: MOD, kind: "popup", width: 220, height: menuHeight(target), props: { role: "menu", target } });
   }
 
+  /** The ⋯ menu: view options, with ticks for the ones that are on. */
+  viewMenu() {
+    const target = { view: true, showHidden: this.showHidden };
+    openOverlay({ mod: MOD, kind: "popup", width: 240, height: menuHeight(target), props: { role: "menu", target } });
+  }
+
   dialog(action, row) {
     openOverlay({ mod: MOD, kind: "dialog", width: 400, height: action === "delete" ? 176 : 186, props: { role: "dialog", action, target: this.entryTarget(row.path, row.dir) } });
   }
@@ -367,6 +420,9 @@ export class Panel {
     // The menu's Insert into terminal and Open with its app: done here, since the menu closes at
     // once and would drop what is still waiting (the clipboard's return, cmd's check).
     if (r.action === "insert") { this.insert(r.path, r.on ?? null, cx); return; }
+    // From the ⋯ menu. This runs inside render, which can't redraw itself: do it a moment later.
+    if (r.action === "hidden") { cx.timer.after(1, cx => this.toggleHidden(cx)); return; }
+    if (r.action === "collapse") { cx.timer.after(1, cx => this.collapseAll(cx)); return; }
     if (r.action === "open-default") {
       openDefault(r.path, r.on ?? null).catch(e => notify({ title: "Could not open", body: String(e?.message ?? e), level: "error" }));
       return;
@@ -446,7 +502,10 @@ export class Panel {
         .when(Boolean(counts), el => el.child(counts))
         .when(Boolean(MARK_LABEL[mark]), el => el.child(div().flex_none().text_size(11).font_semibold().text_color(markColor(mark, t)).child(MARK_LABEL[mark])));
     }
+    // When the file last changed, dim on the right; a changed file shows its line counts instead.
+    const time = row.kind === "file" && !counts ? this.times.get(row.parent)?.get(row.name) : undefined;
     return el.child(div().flex_1().min_w(0).truncate().text_color(nameColor).child(row.name))
+      .when(time !== undefined, el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(when(time))))
       .when(Boolean(counts), el => el.child(counts))
       .when(Boolean(mark) && mark !== "I", el => row.dir
         ? el.child(div().size(6).flex_none().rounded(3).bg(markColor(mark, t)))
@@ -480,17 +539,19 @@ export class Panel {
         .child(h_flex().id("hlf-refresh").size(24).flex_none().items_center().justify_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover)).tooltip("Refresh (F5)")
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.refresh(cx))
           .child(loading ? svg(icon("spinner")).size(14).text_color(t.muted).spin(800) : svg(icon("refresh")).size(14).text_color(t.muted)))
-        // Hidden items (dot names): the open eye while they show.
-        .child(iconButton("hlf-hidden", this.showHidden ? "eye" : "eye-off", this.showHidden ? "Hide hidden items" : "Show hidden items",
-          (_e, cx) => this.toggleHidden(cx), t))
+        // Only Refresh and Open stay in the header; view options live in the ⋯ menu by the search.
         // Opens the folder itself in the system's file manager (local folders only).
         .when(Boolean(root && !ctx.on), el => el.child(iconButton("hlf-open", "external", OPEN_LABEL[appWindow()?.platform] ?? "Open in file manager",
           () => openDefault(root, null).catch(e => notify({ title: "Could not open the folder", body: String(e?.message ?? e), level: "error" })), t))))
       .when(Boolean(strip), el => el.child(strip))
-      .child(h_flex().h(30).mx(8).mb(8).px(8).gap(6).items_center().rounded(7).bg(t.background).border_1().border_color(this.searchFocused ? t.accent : t.border)
-        .child(svg(icon("search")).size(13).flex_none().text_color(t.dim))
-        .child(Input.new(this.search).flex_1().min_w(0).h(28).text_size(12.5).text_color(t.foreground))
-        .when(Boolean(this.query), el => el.child(iconButton("hlf-clear", "x", "Clear (Esc)", (_e, cx) => this.clearSearch(cx), t, false, 20))));
+      // The search, and beside it the ⋯ menu of view options (hidden items, collapse all, and any
+      // added later), so new options never crowd the header and the folder's name.
+      .child(h_flex().mx(8).mb(8).gap(4).items_center()
+        .child(h_flex().h(30).flex_1().min_w(0).px(8).gap(6).items_center().rounded(7).bg(t.background).border_1().border_color(this.searchFocused ? t.accent : t.border)
+          .child(svg(icon("search")).size(13).flex_none().text_color(t.dim))
+          .child(Input.new(this.search).flex_1().min_w(0).h(28).text_size(12.5).text_color(t.foreground))
+          .when(Boolean(this.query), el => el.child(iconButton("hlf-clear", "x", "Clear (Esc)", (_e, cx) => this.clearSearch(cx), t, false, 20))))
+        .child(iconButton("hlf-more", "ellipsis", "More", () => this.viewMenu(), t, false, 28)));
   }
 
   /**
