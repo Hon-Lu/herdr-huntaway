@@ -56,6 +56,10 @@ files (`gpui-kit.d.ts`, `herdr.d.ts`) beside it are the truth for the mod API.
   Fields are separated by `:`, not `;`. A `done` agent turns `idle` once its space is seen.
 - Clean up everything made for a test: tabs, spaces (`space.close` needs `"confirmed": true`),
   `zz-*` mods.
+- Before deleting a `zz-*` mod, check that no layout uses it (`grep zz- ~/.config/herdr-app/layouts/*.json`).
+  A mod opened with `tab.new` can end up as a block in the installed layout; once the mod is gone,
+  Herdr drops that layout from Settings and falls back to `main`. Remove the block from the layout
+  file (not from `layouts/.state/`), then `layout.switch` back.
 
 ## Preview pictures (`preview.png`, shown on herdr.dev)
 
