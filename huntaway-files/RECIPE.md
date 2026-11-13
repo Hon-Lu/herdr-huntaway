@@ -15,10 +15,34 @@ The panel:
   the full path and branch are the tooltip. Then three buttons: refresh (a spinner while loading), hidden items (a crossed
   eye while they are hidden, an open eye while they show) and open the folder in the system's
   file manager.
+  After the branch, `↑N` (`ansi6`) and `↓N` (`ansi4`) when it is ahead of or behind its
+  upstream; the tooltip adds "main → origin/main (3 ahead)".
+- A change summary, only while the shown folder has changes (the files under it, not the whole
+  repo): a 14 px line of 6 px dots and counts, "3 modified", "2 new" (added and untracked),
+  "1 deleted", "1 conflict", 11 px muted, in the tree's mark colors; the lines added and removed
+  (`+144 −65`, `ansi2` / `ansi1`) on the right; under it a 4 px bar split by those counts
+  (2 px gaps, rounded, at least 4 px each). A clean folder shows nothing, so nothing to read.
 - A search field ("Search files").
-- The tree, 26 px rows: folders first, then files, sorted by name with numbers in order. File
-  icons are colored by type (code, config, text, image, archive). Git marks sit on the right:
-  modified, added, deleted, renamed, untracked, conflict; ignored files are dimmed.
+- The tree, 26 px rows: folders first, then files, sorted by name with numbers in order.
+  Icons are Lucide line icons (15 px), tinted with theme colors; `fileLook()` in `ui.js` picks
+  them:
+  - Folders, in the accent color: `src`/`lib`/`app`/`scripts`/`tools` code, `tests` a check,
+    `.github`/`.git` git, `docs` a pen, `layouts`/`components`/`ui`/`views`/`pages` a board,
+    `.vscode`/`config`/`.claude` a cog, `.ssh`/`keys`/`secrets` a key, `downloads` an arrow;
+    made by tools and dimmed: `node_modules`/`dist`/`build`/`target`/`.venv` and the like an
+    archive, `.cache`/`tmp`/`logs` a clock. Others the plain folder, open while expanded.
+  - Files by name first: `package.json` a package, README a book, LICENSE scales, CHANGELOG a
+    clock, `.env*` a key, `.*ignore` a crossed file, lock files a lock (dimmed), `*.test.*` /
+    `*.spec.*` a check, `*.d.ts` type, `*.config.*` and `tsconfig.json` a cog, `Dockerfile` a
+    box, `Makefile` a terminal.
+  - Then by extension: source code one shape in its language's color (TypeScript, CSS, Python
+    `ansi4`; JavaScript `ansi3`; HTML, Rust `ansi1`; …), JSON braces, Markdown and text,
+    scripts a terminal, YAML/TOML/INI a cog, spreadsheets, databases, images, video, audio,
+    archives, fonts, programs, diffs, keys, logs; anything else the plain file, muted.
+  Git marks sit on the right: modified, added, deleted, renamed, untracked, conflict; ignored
+  files are dimmed. A changed file shows, before its mark, the lines added and removed against
+  the last commit (`+42 −8`, 11 px, 85% opacity, only the parts that aren't zero; new and binary
+  files have none).
   `.git`, `.DS_Store`, `Thumbs.db` and `desktop.ini` are never shown. Hidden items (names that
   start with `.` or `$`, and `System Volume Information`) show with muted names while the eye is
   open, and are left out while it is crossed.
@@ -87,7 +111,8 @@ A file tab (one per file; opening it again shows the same tab):
 - `mods/huntaway-files/`: `mod.json` (`place: none`, `focusable`), `main.js` (picks a role from
   `props().role`: the panel, `menu`, `dialog` or `viewer`), `panel.js`, `menu.js`, `preview.js`,
   `open.js`, `markdown.js` (splits Markdown into text, HTML, image and table blocks), `system.js`,
-  `paths.js`, `ui.js`, `icons/`.
+  `paths.js`, `ui.js`, `icons/` (Lucide, ISC licence in `icons/LICENSE-lucide.txt`; new ones are
+  written on one line like the rest, CRLF).
 - Put it in a layout as a block: `"content": { "mod": "huntaway-files" }` (Herdr's own layouts use
   the block id `files` in the stack `panel-body`).
 - Files are opened with `tab.new {name, mod: "huntaway-files", props: {role: "viewer", file, on}}`;
@@ -98,7 +123,8 @@ A file tab (one per file; opening it again shows the same tab):
   UTF-16 (`cmd /u`) to a file in `.cache/huntaway-files/` and read back as bytes; PowerShell
   (about 2 s) only for a folder cmd can't read or whose path has cmd's symbols in it; `sh` on
   macOS, Linux and other machines.
-- Programs it runs: `git` (status, branch, file list), cmd, PowerShell or `sh`, `explorer.exe` /
+- Programs it runs: `git` (`status --branch` for marks and ahead/behind, `branch --show-current`,
+  `diff HEAD --numstat` for line counts, `ls-files` for search), cmd, PowerShell or `sh`, `explorer.exe` /
   `open` / `xdg-open`. On Windows, "Open with its app" and the folder button use `explorer.exe`
   (after cmd's `if exist`, since Explorer opens Documents for a missing path) and links use
   `rundll32 url.dll,FileProtocolHandler`: at once, where PowerShell took two seconds. A path with
@@ -129,3 +155,5 @@ A file tab (one per file; opening it again shows the same tab):
 - Clicking a file opens a tab named after it; clicking it again shows that tab.
 - Edit, change a line, Cancel: the text is back. Edit, change, `Ctrl+S`: the file on disk changed.
 - Delete moves the file to the Recycle Bin or Trash, and the tree updates.
+- In a repo with changes, edited files show `+N −N`, the summary counts them under the header,
+  and committing everything makes the summary go away.

@@ -23,30 +23,78 @@ export function iconButton(id, name, tooltip, onClick, t, active = false, size =
     .child(svg(icon(name)).size(14).text_color(active ? t.foreground : t.muted));
 }
 
-const CODE = new Set(["js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts", "py", "rs", "go", "java", "kt", "kts", "c", "h", "cc", "cpp", "hpp", "cs",
-  "rb", "php", "swift", "m", "mm", "scala", "lua", "dart", "vue", "svelte", "html", "htm", "css", "scss", "sass", "less", "sh", "bash", "zsh",
-  "fish", "ps1", "psm1", "bat", "cmd", "sql", "r", "pl", "ex", "exs", "erl", "hs", "clj", "zig", "nim", "v", "sol", "gd", "astro"]);
-const CONFIG = new Set(["json", "jsonc", "json5", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "xml", "lock", "properties", "editorconfig", "gitignore", "gitattributes", "npmrc"]);
-const TEXT = new Set(["md", "markdown", "mdx", "txt", "rst", "log", "csv", "tsv", "adoc", "org", "tex"]);
-const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tif", "tiff", "avif", "heic"]);
-const ARCHIVE = new Set(["zip", "7z", "rar", "gz", "tgz", "bz2", "xz", "zst", "tar", "jar", "war", "iso", "dmg", "msi", "pkg", "deb", "rpm", "nupkg"]);
-
-/** Colors by extension, using theme ANSI colors so light and dark themes both work. */
-const COLOR = {
-  ts: "ansi4", tsx: "ansi4", mts: "ansi4", cts: "ansi4", js: "ansi3", mjs: "ansi3", cjs: "ansi3", jsx: "ansi3",
-  py: "ansi4", rs: "ansi1", go: "ansi6", java: "ansi1", kt: "ansi5", cs: "ansi5", c: "ansi4", cpp: "ansi4", h: "ansi5", rb: "ansi1",
-  php: "ansi5", swift: "ansi1", html: "ansi1", htm: "ansi1", css: "ansi4", scss: "ansi5", vue: "ansi2", svelte: "ansi1",
-  sh: "ansi2", bash: "ansi2", zsh: "ansi2", ps1: "ansi4", bat: "ansi2", cmd: "ansi2", sql: "ansi3",
-  json: "ansi3", jsonc: "ansi3", yaml: "ansi5", yml: "ansi5", toml: "ansi5", xml: "ansi1", lock: null,
-  md: "ansi4", markdown: "ansi4", mdx: "ansi4",
+// File and folder icons: Lucide line icons (icons/, ISC licence in LICENSE-lucide.txt) tinted
+// with the theme's ANSI colors, so light and dark themes both work. A kind of file gets its own
+// shape; a language its color. Each entry is [icon, theme color].
+const words = s => new Set(s.split(" "));
+const FOLDERS = [
+  [words("src lib app source scripts tools"), "folder-code"],
+  [words("tests test __tests__ spec specs e2e"), "folder-check"],
+  [words(".github .git .gitlab .husky"), "folder-git-2"],
+  [words("docs doc documentation"), "folder-pen"],
+  [words("layouts components ui views pages"), "folder-kanban"],
+  [words(".vscode .idea .config config configs settings .claude"), "folder-cog"],
+  [words(".ssh keys secrets certs"), "folder-key"],
+  [words("downloads"), "folder-down"],
+  // Made by tools, not by hand: dimmed.
+  [words("node_modules vendor .venv venv target dist build out bin obj"), "folder-archive", "dim"],
+  [words(".cache cache tmp temp logs"), "folder-clock", "dim"],
+];
+const NAMES = {
+  "package.json": ["package", "ansi2"], "tsconfig.json": ["file-cog", "ansi4"], "jsconfig.json": ["file-cog", "ansi3"],
+  "dockerfile": ["file-box", "ansi4"], "makefile": ["file-terminal", "ansi3"], "justfile": ["file-terminal", "ansi3"],
+  ".gitkeep": ["file-minus", "dim"], ".gitattributes": ["file-cog", "muted"], ".gitmodules": ["file-cog", "muted"],
 };
+/** Source code: one shape, the language's color. */
+const CODE = {
+  ts: "ansi4", tsx: "ansi4", mts: "ansi4", cts: "ansi4", js: "ansi3", mjs: "ansi3", cjs: "ansi3", jsx: "ansi3",
+  py: "ansi4", rs: "ansi1", go: "ansi6", java: "ansi1", kt: "ansi5", kts: "ansi5", cs: "ansi5", c: "ansi4", h: "ansi5", cc: "ansi4", cpp: "ansi4", hpp: "ansi5",
+  rb: "ansi1", php: "ansi5", swift: "ansi1", scala: "ansi1", lua: "ansi4", dart: "ansi6", vue: "ansi2", svelte: "ansi1", astro: "ansi5",
+  html: "ansi1", htm: "ansi1", css: "ansi4", scss: "ansi5", sass: "ansi5", less: "ansi4", xml: "ansi1", sql: "ansi3", zig: "ansi3", r: "ansi4", pl: "ansi4",
+  ex: "ansi5", exs: "ansi5", erl: "ansi1", hs: "ansi5", clj: "ansi2", nim: "ansi3", sol: "ansi4", gd: "ansi6",
+};
+const KINDS = [
+  [words("json jsonc json5 jsonl"), "file-braces", "ansi3"],
+  [words("md markdown mdx"), "file-text", "ansi4"],
+  [words("txt rst adoc org tex"), "file-text", "muted"],
+  [words("pdf"), "file-text", "ansi1"],
+  [words("sh bash zsh fish ps1 psm1 psd1 bat cmd"), "file-terminal", "ansi2"],
+  [words("yaml yml toml ini cfg conf properties editorconfig env"), "file-cog", "ansi5"],
+  [words("csv tsv xlsx xls ods"), "file-spreadsheet", "ansi2"],
+  [words("db sqlite sqlite3"), "file-database", "ansi3"],
+  [words("png jpg jpeg gif webp bmp svg ico tif tiff avif heic"), "file-image", "ansi5"],
+  [words("mp4 mov mkv webm avi"), "file-video-camera", "ansi5"],
+  [words("mp3 wav flac ogg m4a"), "file-music", "ansi5"],
+  [words("zip 7z rar gz tgz bz2 xz zst tar jar war iso dmg nupkg deb rpm"), "file-archive", "ansi1"],
+  [words("ttf otf woff woff2"), "file-type", "muted"],
+  [words("exe dll msi so dylib bin app"), "file-box", "muted"],
+  [words("diff patch"), "file-diff", "ansi3"],
+  [words("pem key crt cer"), "file-key", "ansi3"],
+  [words("lock lockb"), "file-lock", "dim"],
+  [words("log"), "file-clock", "dim"],
+];
 
-export function fileLook(name, t) {
-  const lower = name.toLowerCase(), ext = extname(lower) || (lower.startsWith(".") ? lower.slice(1) : "");
-  const kind = IMAGES.has(ext) ? "file-image" : ARCHIVE.has(ext) ? "file-archive" : CODE.has(ext) ? "file-code"
-    : CONFIG.has(ext) || lower.startsWith(".") ? "file-config" : TEXT.has(ext) ? "file-text" : "file";
-  const color = IMAGES.has(ext) ? t.ansi5 : ARCHIVE.has(ext) ? t.ansi1 : COLOR[ext] ? t[COLOR[ext]] : t.muted;
-  return { icon: icon(kind), color };
+/** A file's or folder's icon and its color, by name: special names first, then the extension. */
+export function fileLook(name, dir, open, t) {
+  const n = name.toLowerCase(), ext = extname(n);
+  const pick = ([id, color]) => ({ icon: icon(id), color: t[color] ?? t.muted });
+  if (dir) {
+    const f = FOLDERS.find(([s]) => s.has(n));
+    return f ? pick([f[1], f[2] ?? "accent"]) : pick([open ? "folder-open" : "folder", "accent"]);
+  }
+  if (NAMES[n]) return pick(NAMES[n]);
+  if (/^readme(\.|$)/.test(n)) return pick(["book-open", "ansi4"]);
+  if (/^(license|licence|copying|unlicense)([.-]|$)/.test(n)) return pick(["scale", "ansi3"]);
+  if (/^(changelog|changes|history)(\.|$)/.test(n)) return pick(["file-clock", "ansi4"]);
+  if (/^\.env(\.|$)/.test(n)) return pick(["file-key", "ansi3"]);
+  if (n.startsWith(".") && n.endsWith("ignore")) return pick(["file-x", "muted"]);
+  if (/[-_.]lock\.(json|yaml)$/.test(n)) return pick(["file-lock", "dim"]);
+  if (/\.(test|spec)\.[a-z]+$/.test(n)) return pick(["file-check", "ansi2"]);
+  if (/\.d\.[cm]?ts$/.test(n)) return pick(["file-type", "ansi4"]);
+  if (/\.config\.[a-z]+$/.test(n)) return pick(["file-cog", CODE[ext] ?? "ansi5"]);
+  if (CODE[ext]) return pick(["file-code", CODE[ext]]);
+  const k = KINDS.find(([s]) => s.has(ext));
+  return pick(k ? [k[1], k[2]] : ["file", "muted"]);
 }
 
 export const MARK_LABEL = { M: "M", A: "A", D: "D", R: "R", U: "U", C: "!", I: "" };

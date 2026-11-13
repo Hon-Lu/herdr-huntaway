@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, run, window as appWindow } from "herdr";
 import { norm, join, dirname, basename, key, contains, relative, display, homeDir, compareEntries, isRoot, isWindows } from "./paths.js";
-import { listFolders, fileIndex, rank, gitTop, gitBranch, gitStatus, openDefault, MAX_PER_FOLDER } from "./system.js";
+import { listFolders, fileIndex, rank, gitTop, gitBranch, gitStatus, gitLines, openDefault, MAX_PER_FOLDER } from "./system.js";
 import { openInTab } from "./open.js";
 import { menuHeight } from "./menu.js";
 import { MOD, REQUEST, icon, iconButton, glass, rim, fileLook, markColor, MARK_LABEL } from "./ui.js";
@@ -46,7 +46,7 @@ export class Panel {
   init(cx, handle) {
     this.handle = handle;
     this.dirs = new Map(); this.open = new Set(); this.sel = null;
-    this.git = null; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map();
+    this.git = null; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map(); this.lines = new Map();
     this.query = ""; this.results = []; this.index = null;
     this.scroll = VirtualListScrollHandle.new();
     this.range = { start: 0, end: 0 };
@@ -73,7 +73,7 @@ export class Panel {
     if (k === this.ctx?.key) { if (next) this.ctx.space = next.space; return; }
     this.remember();
     this.ctx = next ? { key: k, root: next.root, on: next.on, space: next.space } : null;
-    this.dirs = new Map(); this.sel = null; this.git = null; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map();
+    this.dirs = new Map(); this.sel = null; this.git = null; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map(); this.lines = new Map();
     this.index = null; this.results = []; this.watchFailed = false; this.changed();
     const saved = next ? read("open", {})[key(next.root, next.on)] : null;
     this.open = new Set((saved ?? []).map(rel => join(next.root, rel)));
@@ -176,22 +176,30 @@ export class Panel {
       try {
         const top = this.git?.root === ctx.root ? this.git.top : await gitTop(ctx.root, ctx.on);
         if (this.ctx !== ctx) return;
-        if (!top) { this.git = { root: ctx.root, top: null }; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map(); return; }
-        const [files, branch] = await Promise.all([gitStatus(top, ctx.on), gitBranch(top, ctx.on)]);
+        if (!top) { this.git = { root: ctx.root, top: null }; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map(); this.lines = new Map(); return; }
+        const [status, branch, changes] = await Promise.all([gitStatus(top, ctx.on), gitBranch(top, ctx.on), gitLines(top, ctx.on)]);
         if (this.ctx !== ctx) return;
-        const marks = new Map(), inherit = new Map(), folders = new Map();
-        for (const [rel, mark] of files ?? []) {
+        const marks = new Map(), inherit = new Map(), folders = new Map(), lines = new Map();
+        // The summary under the header counts what changed inside the shown folder only.
+        const summary = { M: 0, A: 0, D: 0, C: 0, add: 0, del: 0 }, inside = abs => contains(ctx.root, abs, ctx.on);
+        for (const [rel, n] of changes) {
+          const abs = join(top, rel);
+          lines.set(key(abs, ctx.on), n);
+          if (inside(abs)) { summary.add += n.add; summary.del += n.del; }
+        }
+        for (const [rel, mark] of status?.files ?? []) {
           const dir = rel.endsWith("/"), abs = join(top, dir ? rel.slice(0, -1) : rel), k = key(abs, ctx.on);
           if (dir) inherit.set(k, mark); else marks.set(k, mark);
           if (mark === "I") continue;
+          if (inside(abs)) summary[mark === "U" ? "A" : mark === "R" ? "M" : mark]++;
           for (let d = dirname(abs); contains(top, d, ctx.on) && d !== abs; d = dirname(d)) {
             const dk = key(d, ctx.on), was = folders.get(dk);
             if (!was || PRIORITY[mark] > PRIORITY[was]) folders.set(dk, mark);
             if (dk === key(top, ctx.on) || isRoot(d)) break;
           }
         }
-        this.git = { root: ctx.root, top, branch };
-        this.marks = marks; this.inherit = inherit; this.folderMarks = folders;
+        this.git = { root: ctx.root, top, branch, upstream: status?.upstream ?? null, ahead: status?.ahead ?? 0, behind: status?.behind ?? 0, summary };
+        this.marks = marks; this.inherit = inherit; this.folderMarks = folders; this.lines = lines;
       } catch {} finally {
         this.gitBusy = false; this.changed(); cx.notify();
         if (this.gitAgain) { this.gitAgain = false; cx.timer.after(400, cx => this.refreshGit(cx)); }
@@ -419,8 +427,14 @@ export class Panel {
     }
     const selected = this.sel && row.path === this.sel;
     const mark = this.markFor(row.path, row.dir), ignored = mark === "I";
-    const look = row.dir ? { icon: icon(row.open ? "folder-open" : "folder"), color: t.accent } : fileLook(row.name, t);
+    const look = fileLook(row.name, row.dir, row.open, t);
     const nameColor = ignored ? t.dim : markColor(mark, t) ?? (row.name.startsWith(".") ? t.muted : t.foreground);
+    // Lines added and removed since the last commit, left of the Git mark: only the parts that
+    // aren't zero, dimmer than the mark so the name stays what you read first.
+    const n = row.dir ? null : this.lines.get(key(row.path, this.ctx?.on));
+    const counts = n && (n.add || n.del) ? h_flex().flex_none().gap(4).text_size(11).opacity(0.85)
+      .when(Boolean(n.add), el => el.child(div().text_color(t.ansi2).child(`+${n.add}`)))
+      .when(Boolean(n.del), el => el.child(div().text_color(t.ansi1).child(`−${n.del}`))) : null;
     const el = h_flex().h(ROW).w_full().pl(pad).pr(8).gap(5).items_center().rounded(6)
       .when(Boolean(selected), el => el.bg(this.focusedList ? t.selected : t.hover))
       .child(row.dir ? svg(icon(row.open ? "chevron-down" : "chevron-right")).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
@@ -429,9 +443,11 @@ export class Panel {
       const parent = row.rel.includes("/") ? row.rel.slice(0, row.rel.lastIndexOf("/")) : "";
       return el.child(div().flex_none().max_w(200).truncate().text_color(nameColor).child(row.name))
         .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(parent))
+        .when(Boolean(counts), el => el.child(counts))
         .when(Boolean(MARK_LABEL[mark]), el => el.child(div().flex_none().text_size(11).font_semibold().text_color(markColor(mark, t)).child(MARK_LABEL[mark])));
     }
     return el.child(div().flex_1().min_w(0).truncate().text_color(nameColor).child(row.name))
+      .when(Boolean(counts), el => el.child(counts))
       .when(Boolean(mark) && mark !== "I", el => row.dir
         ? el.child(div().size(6).flex_none().rounded(3).bg(markColor(mark, t)))
         : el.child(div().flex_none().w(12).text_size(11).font_semibold().text_right().text_color(markColor(mark, t)).child(MARK_LABEL[mark])));
@@ -445,14 +461,22 @@ export class Panel {
     // line the full width; neither when there's nothing to say. Tight line heights keep the two
     // together, and 50 px leaves about 10 px above and below them. The full path is the tooltip
     // (the terminal's own header shows it too).
-    const under = [ctx?.on, this.git?.branch].filter(Boolean).join(" · ");
+    const g = this.git?.root === root ? this.git : null;
+    const under = [ctx?.on, g?.branch].filter(Boolean).join(" · ");
+    // After the branch, how far it is ahead of (↑) and behind (↓) its upstream.
+    const sync = g?.branch ? [g.ahead ? [`↑${g.ahead}`, t.ansi6] : null, g.behind ? [`↓${g.behind}`, t.ansi4] : null].filter(Boolean) : [];
+    const upstream = g?.upstream ? `\n${g.branch} → ${g.upstream}` + (g.ahead || g.behind ? ` (${[g.ahead && `${g.ahead} ahead`, g.behind && `${g.behind} behind`].filter(Boolean).join(", ")})` : "")
+      : g?.branch ? `\n${g.branch}` : "";
+    const strip = g?.summary ? this.summary(g.summary, t) : null;
     return v_flex().flex_none().border_b(1).border_color(t.border)
       .child(h_flex().h(50).px(10).gap(8).items_center()
         .child(svg(icon("folder-open")).size(16).flex_none().text_color(t.accent))
         .child(v_flex().id("hlf-root").flex_1().min_w(0)
-          .tooltip(root ? (ctx.on ? `${ctx.on}: ` : "") + display(root, ctx.on) + (this.git?.branch ? `\n${this.git.branch}` : "") : "")
+          .tooltip(root ? (ctx.on ? `${ctx.on}: ` : "") + display(root, ctx.on) + upstream : "")
           .child(div().min_w(0).truncate().font_semibold().text_size(13).line_height("17px").child(name))
-          .when(Boolean(under), el => el.child(div().min_w(0).truncate().text_size(11).line_height("14px").text_color(t.muted).child(under))))
+          .when(Boolean(under), el => el.child(h_flex().min_w(0).gap(5).text_size(11).line_height("14px")
+            .child(div().min_w(0).truncate().text_color(t.muted).child(under))
+            .children(sync.map(([text, color]) => div().flex_none().text_color(color).child(text))))))
         .child(h_flex().id("hlf-refresh").size(24).flex_none().items_center().justify_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover)).tooltip("Refresh (F5)")
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.refresh(cx))
           .child(loading ? svg(icon("spinner")).size(14).text_color(t.muted).spin(800) : svg(icon("refresh")).size(14).text_color(t.muted)))
@@ -462,10 +486,33 @@ export class Panel {
         // Opens the folder itself in the system's file manager (local folders only).
         .when(Boolean(root && !ctx.on), el => el.child(iconButton("hlf-open", "external", OPEN_LABEL[appWindow()?.platform] ?? "Open in file manager",
           () => openDefault(root, null).catch(e => notify({ title: "Could not open the folder", body: String(e?.message ?? e), level: "error" })), t))))
+      .when(Boolean(strip), el => el.child(strip))
       .child(h_flex().h(30).mx(8).mb(8).px(8).gap(6).items_center().rounded(7).bg(t.background).border_1().border_color(this.searchFocused ? t.accent : t.border)
         .child(svg(icon("search")).size(13).flex_none().text_color(t.dim))
         .child(Input.new(this.search).flex_1().min_w(0).h(28).text_size(12.5).text_color(t.foreground))
         .when(Boolean(this.query), el => el.child(iconButton("hlf-clear", "x", "Clear (Esc)", (_e, cx) => this.clearSearch(cx), t, false, 20))));
+  }
+
+  /**
+   * What changed in the shown folder, between the header and the search: dots and counts in
+   * the tree's own mark colors with the lines added and removed on the right, and a thin bar
+   * split by those counts. Nothing at all while the folder is clean.
+   */
+  summary(s, t) {
+    const parts = [[s.M, "modified", t.ansi3], [s.A, "new", t.ansi2], [s.D, "deleted", t.ansi1], [s.C, s.C === 1 ? "conflict" : "conflicts", t.ansi1]]
+      .filter(([n]) => n > 0);
+    if (!parts.length) return null;
+    return v_flex().px(12).pb(9).gap(6)
+      .child(h_flex().h(14).gap(10).items_center().text_size(11)
+        .child(h_flex().flex_1().min_w(0).gap(10).overflow_hidden()
+          .children(parts.map(([n, label, color]) => h_flex().flex_none().gap(5).items_center()
+            .child(div().size(6).rounded(3).bg(color))
+            .child(div().text_color(t.muted).child(`${n} ${label}`)))))
+        .when(Boolean(s.add || s.del), el => el.child(h_flex().flex_none().gap(5)
+          .when(Boolean(s.add), el => el.child(div().text_color(t.ansi2).child(`+${s.add}`)))
+          .when(Boolean(s.del), el => el.child(div().text_color(t.ansi1).child(`−${s.del}`))))))
+      .child(h_flex().h(4).w_full().gap(2)
+        .children(parts.map(([n, , color]) => div().h(4).min_w(4).flex_grow(n).flex_basis(0).rounded(2).bg(color))));
   }
 
   render(cx) {
