@@ -323,22 +323,48 @@ export async function gitBranch(top, on) {
   } catch { return null; }
 }
 /**
- * Git status as Map(relative path -> mark) plus folder marks. Marks: M modified, A added,
- * D deleted, R renamed, U untracked, C conflict, I ignored. Paths ending in "/" are folders.
+ * Git status: `files` is Map(relative path -> mark), marks M modified, A added, D deleted,
+ * R renamed, U untracked, C conflict, I ignored; paths ending in "/" are folders. With them the
+ * branch's upstream (`origin/main`) and how far ahead and behind it the branch is.
  */
 export async function gitStatus(top, on) {
-  const r = await exec("git", [...GIT, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal", "--ignored=matching"], { cwd: top, on, timeout: 20000 });
+  const r = await exec("git", [...GIT, "status", "--porcelain=v1", "-z", "--branch", "--no-renames", "--untracked-files=normal", "--ignored=matching"], { cwd: top, on, timeout: 20000 });
   if (r.code !== 0) return null;
-  const files = new Map();
+  const files = new Map(), out = { files, upstream: null, ahead: 0, behind: 0 };
   let n = 0;
   for (const entry of r.stdout.split("\0")) {
+    // "## main...origin/main [ahead 2, behind 1]"
+    if (entry.startsWith("## ")) {
+      const m = /^## .*?(?:\.\.\.(\S+))?(?: \[(.*)\])?$/.exec(entry);
+      out.upstream = m?.[1] ?? null;
+      out.ahead = Number(/ahead (\d+)/.exec(m?.[2] ?? "")?.[1] ?? 0);
+      out.behind = Number(/behind (\d+)/.exec(m?.[2] ?? "")?.[1] ?? 0);
+      continue;
+    }
     if (entry.length < 4 || ++n > 20000) continue;
     const xy = entry.slice(0, 2), path = entry.slice(3);
     const mark = xy === "!!" ? "I" : xy === "??" ? "U" : xy.includes("U") || xy === "AA" || xy === "DD" ? "C"
       : xy.includes("D") ? "D" : xy.includes("A") ? "A" : xy.includes("R") ? "R" : "M";
     files.set(path, mark);
   }
-  return files;
+  return out;
+}
+/**
+ * Lines added and removed per file against the last commit (staged and not), as
+ * Map(relative path -> { add, del }). Binary files and new, untracked ones aren't in it; nor is
+ * anything before the first commit.
+ */
+export async function gitLines(top, on) {
+  const lines = new Map();
+  try {
+    const r = await exec("git", [...GIT, "diff", "HEAD", "--numstat", "-z", "--no-renames"], { cwd: top, on, timeout: 20000 });
+    if (r.code !== 0) return lines;
+    for (const entry of r.stdout.split("\0")) {
+      const m = /^(\d+)\t(\d+)\t(.+)$/s.exec(entry);
+      if (m && lines.size < 20000) lines.set(m[3], { add: Number(m[1]), del: Number(m[2]) });
+    }
+  } catch {}
+  return lines;
 }
 
 // ---- reading and writing files -------------------------------------------------
