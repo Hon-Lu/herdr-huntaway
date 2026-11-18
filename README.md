@@ -44,6 +44,9 @@ Made for Windows and macOS. Linux should work but is untested.
 - Click a file to open it in its own tab. Edit text files and save with `Ctrl+S`.
 - Markdown has three views: Preview, Split (source beside the live result) and Code, with images shown, including HTML `<img>`, centered blocks, badges and images in tables.
 - Images open with zoom: fit, 100%, or step in and out (`Ctrl` + wheel, `Ctrl` `+` / `-`). Drag with the left button to look around; double-click switches between fit and 100%.
+- In a space on an ssh machine, it shows that machine's files. They open read-only; images up to
+  2 MB show at once and bigger ones (up to 4.4 MB) on a click. Right-click a file or folder and
+  choose Download to this computer to copy it into your Downloads folder (needs ssh keys, as `scp` uses).
 
 ## huntaway-newspace
 

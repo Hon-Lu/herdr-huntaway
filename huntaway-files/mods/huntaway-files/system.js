@@ -13,7 +13,7 @@
 // receives its script as -EncodedCommand (UTF-16), so paths with spaces,
 // quotes or non-ASCII characters never pass through a command line.
 import * as fs from "fs/promises";
-import { exec, readTextFile, writeTextFile, appHome } from "herdr";
+import { exec, hc, home, readTextFile, writeTextFile, appHome } from "herdr";
 import { norm, join, dirname, basename, extname, isWindows, isMac, localWindows, underHome, display, key, winPath, setRemoteHome } from "./paths.js";
 
 export const MAX_PER_FOLDER = 5000;
@@ -525,6 +525,53 @@ export async function cacheImage(path, on, dark = true) {
   if (/\.svg$/i.test(name)) await resolveSvgVars(join(dir, name), dark);
   return `${CACHE}/${name}`;
 }
+// Another machine's image comes over as base64 in exec's output, which from another machine fails
+// between 6 and 7 MB (measured; not the 8 MiB said for this one): up to 4.4 MB fits (5.9 MB of
+// base64). Up to 2 MB it is fetched when the file opens; bigger ones wait for a click; larger
+// still can only be downloaded (scp).
+export const REMOTE_IMAGE_AUTO = 2e6, REMOTE_IMAGE_MAX = 4.4e6;
+const B64_PART = 1000000; // characters per part file (writeTextFile takes at most 1 MiB)
+
+/**
+ * Copies a file from another machine to `to` here, if it is at most `limit` bytes: one call there
+ * prints its size, then its bytes in base64; here the text goes into a file and the system's own
+ * tool decodes it (fs.writeFile can't write bytes). Resolves to { size, copied }.
+ */
+async function copyFromRemote(path, on, to, limit) {
+  const text = remoteWindows(on, path)
+    ? await powershell(`$f = Get-Item -LiteralPath ${psq(display(path, on))}; [Console]::Out.Write([string]$f.Length + "\`n")
+      if ($f.Length -le ${limit}) { [Console]::Out.Write([Convert]::ToBase64String([IO.File]::ReadAllBytes($f.FullName))) }`, { on, timeout: 60000 })
+    : await sh('n=$(wc -c < "$1") || exit 1; printf "%s\\n" $n; [ "$n" -le "$2" ] && base64 < "$1" | tr -d "\\n\\r"; true', [path, String(limit)], { on, timeout: 60000 });
+  const cut = text.indexOf("\n"), size = Number(text.slice(0, cut).trim());
+  if (!Number.isFinite(size)) throw new Error("Could not read the image");
+  if (size > limit) return { size, copied: false };
+  // writeTextFile takes at most 1 MiB: the base64 goes into numbered parts, joined when decoding.
+  const data = text.slice(cut + 1).trim(), parts = [];
+  try {
+    for (let i = 0; i < data.length || !parts.length; i += B64_PART) {
+      const part = `${to}.b64.${parts.length}`;
+      parts.push(part);
+      await writeTextFile(part, data.slice(i, i + B64_PART), null);
+    }
+    if (isWindows()) await powershell(`[IO.File]::WriteAllBytes(${psq(display(to, null))}, [Convert]::FromBase64String(-join @(${parts.map(p => `[IO.File]::ReadAllText(${psq(display(p, null))})`).join(",")})))`);
+    else await sh('out=$1; shift; cat "$@" | { base64 -d 2>/dev/null || base64 -D; } > "$out"', [to, ...parts]);
+  } finally { for (const p of parts) await fs.unlink(p).catch(() => {}); }
+  return { size, copied: true };
+}
+
+/**
+ * Another machine's image, copied into the cache when it is at most `limit` bytes: { rel } then,
+ * else { size } (not copied; up to REMOTE_IMAGE_MAX it can be asked for with a larger limit).
+ */
+export async function cacheRemoteImage(path, on, dark = true, limit = REMOTE_IMAGE_AUTO) {
+  const dir = await cacheDir(), name = cacheName(path, extname(path)), to = join(dir, name);
+  const r = await copyFromRemote(path, on, to, Math.min(limit, REMOTE_IMAGE_MAX));
+  if (!r.copied) return { size: r.size };
+  if (!(await fs.exists(to))) throw new Error("Could not read the image");
+  if (/\.svg$/i.test(name)) await resolveSvgVars(to, dark);
+  return { rel: `${CACHE}/${name}` };
+}
+
 /** The size of an image already in the cache, or null. */
 export async function cachedImageSize(rel) {
   try { return imageSize(await fs.readFile(join(norm(appHome()), rel))); } catch { return null; }
@@ -577,23 +624,30 @@ export function imageSize(bytes) {
  * Returns a Map from each source to { rel, size } or { error }.
  */
 export async function cacheMarkdownImages(sources, fileDir, on, dark = true) {
-  const out = new Map(), jobs = [], dir = await cacheDir();
+  const out = new Map(), jobs = [], remote = [], dir = await cacheDir();
   for (const src of sources) {
     let from = src, ext;
     if (/^https?:\/\//i.test(src)) {
       ext = /\.(png|jpe?g|gif|webp|svg|bmp)(?:[?#]|$)/i.exec(src)?.[1] ?? (/shields\.io|badge|\.svg/i.test(src) ? "svg" : "img");
     } else {
-      if (on) { out.set(src, { error: "Images are shown only for files on this computer" }); continue; }
       let path = decodeURIComponent(src.replace(/^file:\/\/\/?/i, "").replace(/[?#].*$/, ""));
       path = /^([a-z]:)?[\\/]/i.test(path) ? norm(path) : norm(join(fileDir, path));
       const parts = [];
       for (const part of path.split("/")) { if (part === "..") parts.pop(); else if (part !== ".") parts.push(part); }
       from = parts.join("/"); ext = extname(from);
     }
-    const name = cacheName(src, ext);
-    jobs.push({ src, from, to: join(dir, name), rel: `${CACHE}/${name}` });
+    const name = cacheName(src, ext), job = { src, from, to: join(dir, name), rel: `${CACHE}/${name}` };
+    // Another machine's pictures come over one by one, those up to REMOTE_IMAGE_AUTO only.
+    (on && !/^https?:/i.test(src) ? remote : jobs).push(job);
   }
-  try { await fill(jobs); } catch {}
+  for (const job of remote) {
+    try {
+      const r = await copyFromRemote(job.from, on, job.to, REMOTE_IMAGE_AUTO);
+      if (r.copied) jobs.push({ ...job, done: true });
+      else out.set(job.src, { error: `Image too large to fetch (${(r.size / 1e6).toFixed(1)} MB)` });
+    } catch { out.set(job.src, { error: "Image file not found" }); }
+  }
+  try { await fill(jobs.filter(j => !j.done)); } catch {}
   for (const job of jobs) {
     try {
       let bytes = await fs.readFile(job.to);
@@ -669,6 +723,36 @@ export async function remove(path, dir, on) {
   if (remoteWindows(on, path)) await powershell(`Remove-Item -LiteralPath ${psq(display(path, on))} -Recurse -Force`, { on, timeout: 120000 });
   else await sh('rm -rf -- "$1"', [path], { on, timeout: 120000 });
   return "deleted";
+}
+
+/** "name (2).ext" for the second copy of "name.ext" (a folder: "name (2)"). */
+const numbered = (name, n, dir) => {
+  const dot = dir ? -1 : name.lastIndexOf(".");
+  return dot > 0 ? `${name.slice(0, dot)} (${n})${name.slice(dot)}` : `${name} (${n})`;
+};
+
+/**
+ * Copies another machine's file or folder into this computer's Downloads folder with scp, through
+ * the machine's ssh target (`hc machine ls`): keys or an agent only (BatchMode, never a password
+ * prompt), no size limit. A name already there gets " (2)", " (3)", …. Resolves to where it went.
+ */
+export async function download(path, on, dir) {
+  const r = await hc(["machine", "ls", "--json"]);
+  let machine = null;
+  try { machine = (JSON.parse(r.stdout).machines ?? []).find(m => m.name === on) ?? null; } catch {}
+  if (!machine?.target || machine.via) throw new Error(`${on} can't be reached with scp`);
+  const downloads = join(norm(home()), "Downloads"), name = basename(path);
+  try { await fs.mkdir(downloads, { recursive: true }); } catch {}
+  let dest = join(downloads, name);
+  for (let n = 2; await fs.exists(dest); n++) dest = join(downloads, numbered(name, n, dir));
+  const res = await exec("scp", ["-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", ...(dir ? ["-r"] : []),
+    `${machine.target}:${path}`, display(dest, null)], { timeout: 600000 });
+  if (res.code !== 0) {
+    // OpenSSH's warnings start with "**"; the reason is the last other line.
+    const why = res.stderr.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("**")).pop();
+    throw new Error(why?.trim() || "scp failed");
+  }
+  return dest;
 }
 
 export async function reveal(path, on) {

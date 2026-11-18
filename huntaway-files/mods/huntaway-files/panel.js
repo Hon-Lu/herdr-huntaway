@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, run, machines, layout, window as appWindow } from "herdr";
 import { norm, join, dirname, basename, key, contains, relative, display, homeDir, compareEntries, isRoot, isWindows } from "./paths.js";
-import { listFolders, fileTimes, fileIndex, rank, gitTop, gitStatus, gitLines, openDefault, MAX_PER_FOLDER } from "./system.js";
+import { listFolders, fileTimes, fileIndex, rank, gitTop, gitStatus, gitLines, openDefault, download, MAX_PER_FOLDER } from "./system.js";
 import { openInTab } from "./open.js";
 import { menuHeight } from "./menu.js";
 import { MOD, REQUEST, icon, iconButton, glass, rim, fileLook, markColor, MARK_LABEL } from "./ui.js";
@@ -466,6 +466,14 @@ export class Panel {
     if (r.action === "collapse") { cx.timer.after(1, cx => this.collapseAll(cx)); return; }
     if (r.action === "open-default") {
       openDefault(r.path, r.on ?? null).catch(e => notify({ title: "Could not open", body: String(e?.message ?? e), level: "error" }));
+      return;
+    }
+    // The panel downloads it: the menu closes at once, and closing cancels its own calls.
+    if (r.action === "download") {
+      notify({ title: `Downloading ${basename(r.path)}…`, body: `from ${r.on}`, timeout: 2500 });
+      download(r.path, r.on, r.dir).then(
+        dest => notify({ title: "Downloaded", body: display(dest, null), level: "success" }),
+        e => notify({ title: "Could not download", body: String(e?.message ?? e), level: "error" }));
       return;
     }
     const ctx = this.ctx;

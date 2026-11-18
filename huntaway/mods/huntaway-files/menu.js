@@ -29,6 +29,7 @@ function items(target) {
   if (target.dir) list.push({ id: "new-file", label: "New file…" }, { id: "new-folder", label: "New folder…" });
   list.push({ id: "insert", label: "Insert into terminal", hint: platform === "macos" ? "⌥ Click" : "Alt+Click" });
   if (local) list.push({ id: "reveal", label: revealLabel });
+  else list.push({ id: "download", label: "Download to this computer" });
   list.push({ id: "copy", label: "Copy path", group: true });
   if (!target.isRoot) list.push({ id: "copy-rel", label: "Copy relative path" });
   if (!target.isRoot) list.push({ id: "rename", label: "Rename…", group: true }, { id: "delete", label: "Delete…", danger: true });
@@ -57,6 +58,7 @@ export class Menu {
       case "reveal": reveal(t.path, t.on).catch(e => fail("Could not show the file", e)); break;
       // The panel inserts it: this menu closes now, and the clipboard is put back a moment later.
       case "insert": tell({ action: "insert", path: t.path, on: t.on }); break;
+      case "download": tell({ action: "download", path: t.path, on: t.on, dir: Boolean(t.dir) }); break;
       case "copy": cx.write_to_clipboard(display(t.path, t.on)); break;
       case "copy-rel": cx.write_to_clipboard(display(relative(t.root, t.path, t.on), t.on)); break;
       case "new-file": case "new-folder": case "rename": case "delete": dialog(item.id); return;

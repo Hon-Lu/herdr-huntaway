@@ -93,8 +93,14 @@ A file tab (one per file; opening it again shows the same tab):
 - Another machine's folder can't be watched, and each read there is a few programs over ssh, so
   it is read again only while the panel shows and the machine is online: every 10 s while an
   agent in the space is working, at once when the space's status changes (an agent finished) or
-  the panel shows again, else every minute. Its files open read-only (no Edit, no image preview,
-  no "Open with its app"); a file tab shows its folder from that machine's home (`~`).
+  the panel shows again, else every minute. Its files open read-only (no Edit, no "Open with its
+  app"); a file tab shows its folder from that machine's home (`~`).
+- Another machine's images: up to 2 MB they show when the tab opens (Markdown's pictures too); up
+  to 4.4 MB the tab says how big it is, with "Load image" and "Download to this computer";
+  larger, only Download.
+- "Download to this computer" (right-click on another machine's file or folder, or a big
+  image's tab) copies it into this computer's `Downloads` folder; a name already there gets
+  " (2)", " (3)", …. A toast says when it starts and where it went, or why it failed.
 - Expanded folders are remembered per root. Hidden items show at first; hiding them is remembered
   for every folder.
 - Keys in the tree: arrows, Page Up/Down, Home/End, Enter (open), Left/Right (fold), F2 (rename),
@@ -151,10 +157,19 @@ A file tab (one per file; opening it again shows the same tab):
   `rundll32 url.dll,FileProtocolHandler`: at once, where PowerShell took two seconds. A path with
   a comma or cmd's symbols, or a link with spaces, still goes through PowerShell.
 
+- Another machine's image: one call there prints its size, then (when small enough) its bytes in
+  base64 (PowerShell `ReadAllBytes`, or `wc -c` and `base64`); the text is written to the cache
+  with `writeTextFile` and decoded here (PowerShell `FromBase64String`, or `base64 -d`).
+- Download: `scp -q -o BatchMode=yes [-r] <target>:<path> <Downloads>`, the target from
+  `hc machine ls --json` (a machine reached `via` another can't be). BatchMode: it fails at once
+  where it would ask for a password.
+
 ## Watch out
 
 - Herdr's `fs.writeFile` writes binary data as 0 bytes and `fetch` has no binary body: copy and
   download images with PowerShell (`Copy-Item`, `curl.exe`) or `cp` / `curl`, in one batch.
+- `exec` output from another machine fails between 6 and 7 MB (an empty "hc exec:" error), less
+  than the 8 MiB said for this one: keep base64 under 6 MB (images up to 4.4 MB).
 - SVGs styled with CSS variables (`var(--bg)`) draw black: put the values in when caching
   (the dark-scheme ones on a dark theme). The runtime has no `TextDecoder` either.
 

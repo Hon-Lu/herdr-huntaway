@@ -4,8 +4,8 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
 import { theme, settings, notify } from "herdr";
-import { basename, dirname, extname, join, norm } from "./paths.js";
-import { readText, writeText, kindOf, cacheImage, cacheMarkdownImages, cachedImageSize, dropCached, openDefault, reveal, openUrl } from "./system.js";
+import { basename, dirname, extname, join, norm, display } from "./paths.js";
+import { readText, writeText, kindOf, cacheImage, cacheRemoteImage, download, REMOTE_IMAGE_AUTO, REMOTE_IMAGE_MAX, cacheMarkdownImages, cachedImageSize, dropCached, openDefault, reveal, openUrl } from "./system.js";
 import { parseMarkdown, imageSources } from "./markdown.js";
 import { iconButton, icon } from "./ui.js";
 
@@ -61,7 +61,7 @@ export class Preview {
 
   open(path, on, cx) {
     this.release();
-    Object.assign(this, { path, on, zoom: null, pan: { x: 0, y: 0 }, drag: null, imageSize: null, kind: kindOf(path), text: null, error: null, loading: true, editing: false, stale: false, notice: null, token: this.token + 1 });
+    Object.assign(this, { path, on, zoom: null, pan: { x: 0, y: 0 }, drag: null, imageSize: null, bigImage: null, imageLimit: REMOTE_IMAGE_AUTO, kind: kindOf(path), text: null, error: null, loading: true, editing: false, stale: false, notice: null, token: this.token + 1 });
     this.load(cx);
   }
 
@@ -99,7 +99,14 @@ export class Preview {
       try {
         if (kind === "binary") return;
         if (kind === "image") {
-          const rel = await cacheImage(path, on, darkTheme());
+          // Another machine's image: fetched now when small, else it waits for Load (bigImage).
+          let rel;
+          if (on) {
+            const r = await cacheRemoteImage(path, on, darkTheme(), this.imageLimit);
+            if (token !== this.token) { if (r.rel) dropCached(r.rel); return; }
+            if (!r.rel) { this.bigImage = r.size; return; }
+            rel = r.rel;
+          } else rel = await cacheImage(path, on, darkTheme());
           if (token !== this.token) { dropCached(rel); return; }
           const old = this.image; this.image = rel; if (old) dropCached(old);
           this.imageSize = await cachedImageSize(rel);
@@ -285,7 +292,24 @@ export class Preview {
     if (this.error) content = note(this.error, buttons);
     else if (this.kind === "binary") content = note("Binary file — no preview", buttons);
     else if (this.kind === "image") {
-      if (!this.image) content = note(this.loading ? "Loading image…" : "No preview");
+      const mb = n => `${(n / 1e6).toFixed(1)} MB`;
+      if (!this.image && this.bigImage && !this.loading) {
+        // Another machine's image too big to fetch unasked: Load brings it (up to REMOTE_IMAGE_MAX).
+        // Larger than can be fetched: only Download (scp) brings it over.
+        const pill = (id, label, onClick) => h_flex().id(id).px(10).h(26).items_center().rounded(6).bg(t.raised)
+          .hover(s => s.bg(t.hover)).cursor_pointer().text_size(12).text_color(t.foreground).on_click(onClick).child(label);
+        const get = pill("pv-download", "Download to this computer", () => {
+          const where = this.on;
+          notify({ title: `Downloading ${basename(this.path)}…`, body: `from ${where}`, timeout: 2500 });
+          download(this.path, where, false).then(dest => notify({ title: "Downloaded", body: display(dest, null), level: "success" }), e => fail("Could not download", e));
+        });
+        content = this.bigImage > REMOTE_IMAGE_MAX
+          ? note(`This image is ${mb(this.bigImage)} on ${this.on}: too large to preview from there (up to ${mb(REMOTE_IMAGE_MAX)})`, get)
+          : note(`This image is ${mb(this.bigImage)} on ${this.on}`, h_flex().gap(8)
+            .child(pill("pv-load", "Load image", (_e, cx) => { this.imageLimit = REMOTE_IMAGE_MAX; this.bigImage = null; this.load(cx); cx.notify(); }))
+            .child(get));
+      }
+      else if (!this.image) content = note(this.loading ? (this.imageLimit > REMOTE_IMAGE_AUTO ? "Fetching image…" : "Loading image…") : "No preview");
       else {
         // Fit: the whole image in the tab. Zoomed: its size times the zoom, moved by dragging with
         // the left button or by the wheel (Shift: sideways). Ctrl (Cmd) and the wheel zoom;
