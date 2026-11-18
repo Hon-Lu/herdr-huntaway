@@ -1,6 +1,7 @@
 // Folders for the New space dialog: listing one folder (anywhere, also outside the home
 // folder), the drives, and a background index of folders (under home and near the open spaces)
-// for searching.
+// for searching. On another machine (a space's `machine`) the same goes through `exec({ on })`:
+// PowerShell on Windows, `sh` and `find` elsewhere.
 import { exec, home, appHome } from "herdr";
 import * as fs from "fs/promises";
 
@@ -26,11 +27,55 @@ function utf16le(text) {
   return bytes;
 }
 const psq = s => "'" + String(s).replace(/['‘’‚‛]/g, "$&$&") + "'";
-async function powershell(script, timeout = 8000) {
+async function powershell(script, timeout = 8000, on = null) {
   // UTF-8 out, so non-English folder names come back intact.
   const wrapped = "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);" + script;
-  const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64(utf16le(wrapped))], { timeout });
+  const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64(utf16le(wrapped))], { timeout, on });
   return r.code === 0 ? r.stdout : "";
+}
+
+// --- Another machine: what kind it is, asked once per machine while the mod is loaded.
+const REMOTE_TIMEOUT = 30000; // a cold PowerShell over ssh can take many seconds
+const noShell = e => /cannot start sh|program not found|not recognized/i.test(String(e?.message ?? e));
+const machines = new Map(); // machine -> Promise<{ win, home, drives }>
+
+/**
+ * Where folders are on `on`: Windows or not, its home and its drives (["/"] off Windows).
+ * This computer answers at once; another machine is asked (`sh`, else PowerShell: Windows has
+ * no `sh`). Rejects when the machine can't be reached; the next call asks again. What it said
+ * last time is kept (localStorage), so a later dialog answers at once and asks again behind it.
+ */
+export const here = () => ({ win: isWin(), home: norm(home()), drives: null });
+export function place(on) {
+  if (!on) return Promise.resolve(here());
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(`place:${on}`) ?? "null"); } catch { return null; } })();
+  if (!machines.has(on)) {
+    const asking = (async () => {
+      try {
+        const r = await exec("sh", ["-c", 'printf "%s" "$HOME"'], { on, timeout: REMOTE_TIMEOUT });
+        if (r.code === 0 && r.stdout.trim()) return { win: false, home: norm(r.stdout.trim()), drives: ["/"] };
+      } catch (e) { if (!noShell(e)) throw e; }
+      const out = await powershell("[Console]::Out.Write($HOME + \"`n\" + ((Get-PSDrive -PSProvider FileSystem | ForEach-Object { $_.Name + ':' }) -join \"`n\"))", REMOTE_TIMEOUT, on);
+      const [h, ...rest] = out.split(/\r?\n/).map(s => s.trim());
+      if (!h) throw new Error("No answer");
+      const list = rest.map(s => s.toUpperCase()).filter(s => /^[A-Z]:$/.test(s));
+      return { win: true, home: norm(h), drives: list.length ? list : ["C:"] };
+    })();
+    asking.then(p => { try { localStorage.setItem(`place:${on}`, JSON.stringify(p)); } catch {} }, () => machines.delete(on));
+    machines.set(on, asking);
+  }
+  return saved ? Promise.resolve(saved) : machines.get(on);
+}
+
+/** Subfolder names on another machine. */
+async function listRemote(path, keep, on, win) {
+  if (win) {
+    const target = (/^[a-z]:$/i.test(path) ? path + "/" : path).replace(/\//g, "\\");
+    const out = await powershell(`[IO.DirectoryInfo]::new(${psq(target)}).EnumerateDirectories() | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::Hidden) } | ForEach-Object { $_.Name }`, REMOTE_TIMEOUT, on);
+    return out.split(/\r?\n/).filter(Boolean).filter(keep).sort(byName);
+  }
+  const r = await exec("sh", ["-c", 'for f in "$1"/*/ "$1"/.*/; do [ -d "$f" ] && basename "$f"; done', "sh", path], { on, timeout: REMOTE_TIMEOUT });
+  return r.code === 0 ? r.stdout.split("\n").filter(n => n && n !== "." && n !== "..").filter(keep).sort(byName) : [];
 }
 
 // --- cmd, with Unicode output. Run by Herdr it has no console and would write names in the
@@ -69,10 +114,12 @@ async function cmdText(args) {
 
 const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-/** The subfolder names of one folder, hidden ones left out unless asked for. [] when unreadable. */
-export async function listDirs(dir, { hidden = false } = {}) {
+/** The subfolder names of one folder, hidden ones left out unless asked for. [] when unreadable.
+ *  `on`: another machine, `win` whether it runs Windows (from place()). */
+export async function listDirs(dir, { hidden = false, on = null, win = false } = {}) {
   const path = norm(dir) || "/";
   const keep = n => hidden || !n.startsWith(".");
+  if (on) { try { return await listRemote(path, keep, on, win); } catch { return []; } }
   try {
     const list = await fs.readdir(/^[a-z]:$/i.test(path) ? path + "/" : path, { withFileTypes: true });
     return list.filter(d => d.isDirectory() && keep(d.name)).map(d => d.name).sort(byName);
@@ -114,7 +161,7 @@ const SKIP = new Set(["node_modules", "appdata", "library", "application data", 
   "pkgs", "site-packages", "miniconda3", "anaconda3", "scoop", "onedrive", "icloud drive", "windows", "program files", "program files (x86)", "programdata"]);
 const SKIP_INSIDE = new Set(["target", "dist", "build", "out", "vendor", "bin", "obj", "go"]);
 const DEPTH = 6, ROOT_DEPTH = 4, LIMIT = 40000;
-let index = null; // { folders: string[], roots: string[], pending: number, done: boolean }
+const indexes = new Map(); // machine ("" here) -> { folders: string[], roots: string[], pending: number, done: boolean }
 
 const lower = p => norm(p).toLowerCase();
 const within = (p, root) => { const a = lower(p), r = lower(root); return a === r || a.startsWith(r.endsWith("/") ? r : r + "/"); };
@@ -124,11 +171,15 @@ const isTop = p => /^[a-z]:\/?$|^\/$/i.test(norm(p));
  * The folder index, starting it the first time; it grows in place until `done`. `near` are
  * folders in use (the open spaces'): the folder each sits in is indexed as well, unless home
  * covers it already or it is a whole drive (then the folder itself is).
+ * `where`: another machine's { on, win, home } (from place()); its home is walked there in one go.
  */
-export function folderIndex(near = []) {
+export function folderIndex(near = [], where = null) {
+  const on = where?.on ?? null, k = on ?? "";
+  let index = indexes.get(k);
   if (!index) {
-    index = { folders: [], roots: [norm(home())], pending: 1, done: false };
-    build(index).finally(() => finish(index));
+    index = { folders: [], roots: [on ? where.home : norm(home())], pending: 1, done: false };
+    indexes.set(k, index);
+    (on ? buildOther(index, where.home, { on, win: where.win, depth: DEPTH }) : build(index)).finally(() => finish(index));
   }
   for (const f of near) {
     const n = norm(f);
@@ -138,27 +189,34 @@ export function folderIndex(near = []) {
     if (index.roots.some(r => within(root, r))) continue;
     index.roots.push(root);
     index.pending++; index.done = false;
-    buildOther(index, root).finally(() => finish(index));
+    buildOther(index, root, { on, win: on ? where.win : isWin(), depth: ROOT_DEPTH }).finally(() => finish(index));
   }
   return index;
 }
 
 function finish(ix) { if (--ix.pending === 0) ix.done = true; }
 
-/** Outside home the in-process reader may not look: walk there with PowerShell or `find`. */
-async function buildOther(ix, root) {
+/** Outside home (or on another machine) the in-process reader may not look: walk there with
+ *  PowerShell or `find`, `depth` levels down. */
+async function buildOther(ix, root, { on = null, win = isWin(), depth = ROOT_DEPTH } = {}) {
+  const timeout = on ? 60000 : 30000;
   try {
     let out;
-    if (isWin()) {
+    if (win) {
       const list = s => [...s].map(psq).join(",");
       out = await powershell(`$skip=@(${list(SKIP)});$skipIn=@(${list(SKIP_INSIDE)});`
         + `$q=[Collections.Generic.Queue[object]]::new();$q.Enqueue(@(${psq(root.replace(/\//g, "\\") + "\\")},0));$n=0;`
         + `$skipAttr=[IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::ReparsePoint;`
         + `while($q.Count -gt 0 -and $n -lt ${LIMIT}){$d,$lv=$q.Dequeue();try{foreach($c in [IO.DirectoryInfo]::new($d).EnumerateDirectories()){`
         + `if($c.Attributes -band $skipAttr){continue};$l=$c.Name.ToLower();if($l.StartsWith('.') -or $skip -contains $l){continue};`
-        + `$c.FullName;$n++;if($lv+1 -lt ${ROOT_DEPTH} -and -not($skipIn -contains $l)){$q.Enqueue(@($c.FullName,($lv+1)))}}}catch{}}`, 30000);
+        + `$c.FullName;$n++;if($lv+1 -lt ${depth} -and -not($skipIn -contains $l)){$q.Enqueue(@($c.FullName,($lv+1)))}}}catch{}}`, timeout, on);
     } else {
-      const r = await exec("find", [root, "-mindepth", "1", "-maxdepth", String(ROOT_DEPTH), "-type", "d"], { timeout: 30000 });
+      // Hidden and tool folders aren't gone into; build output is listed but not gone into.
+      const names = set => [...set].flatMap((n, i) => [...(i ? ["-o"] : []), "-iname", n]);
+      const r = await exec("find", [root, "-mindepth", "1", "-maxdepth", String(depth),
+        "(", "-name", ".*", "-o", ...names(SKIP), ")", "-prune", "-o",
+        "-type", "d", "(", ...names(SKIP_INSIDE), ")", "-print", "-prune", "-o",
+        "-type", "d", "-print"], { on, timeout });
       out = r.stdout ?? "";
     }
     const base = lower(root).length;

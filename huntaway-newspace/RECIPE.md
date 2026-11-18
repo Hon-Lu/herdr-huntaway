@@ -9,7 +9,8 @@ Enter: the new space opens with a terminal there.
 ## What you see
 
 A 520×454 card in the middle of the window, 16 px corners, the theme's `background`:
-- A header: "New space", and on the right a hint ("Indexing N folders…" while it reads your
+- A header: "New space" (for another machine, a server icon and its name beside it, dim), and on
+  the right a hint ("Indexing N folders…" while it reads your
   folders, "⇧Tab up a folder" while browsing) and "Esc".
 - A field with a yellow (`ansi3`) rim, placeholder "Type a path, or words to search"; a folder
   icon, or a search icon while it holds words.
@@ -17,13 +18,18 @@ A 520×454 card in the middle of the window, 16 px corners, the theme's `backgro
   path under it (`~` for home, `C:\` for a drive). The highlighted row has a `hover` fill that
   slides (160 ms) with the arrow keys or a click, and says "Tab open · ↵ create" on the right; a
   row under the pointer gets a fainter fill. Nothing is highlighted until a key or a click.
-- Empty, the list offers places to start: the folders the terminals on this computer are in (and
-  the spaces' start folders), home, then the drives (`/` on macOS and Linux).
+- Empty, the list offers places to start: the folders the terminals of that machine's spaces are
+  in (and those spaces' start folders), its home, then its drives (`/` off Windows). Another
+  machine's first time shows "Connecting to <machine>…" (or "Can't reach <machine>") as the only
+  row until it answers.
 - At the bottom, "Starts in <folder>" (where Enter would start the space) and a Create button in
   yellow, dimmed while there is no such folder.
 
 ## How it behaves
 
+- It works on one machine: `props.machine` (`""` for this computer, or a name from
+  `hc machine ls`), else the shown space's machine. Paths, `~`, the drives, the folders listed and
+  the index are all that machine's, and the space is made there.
 - The field holds where the space starts; the list suggests folders for what was typed. Up/Down
   put the highlighted folder's path in the field without changing the list; typing after that
   goes on from that path (a slash lists what is inside it).
@@ -45,7 +51,8 @@ A 520×454 card in the middle of the window, 16 px corners, the theme's `backgro
   typed while a row is highlighted, else closes.
 - Mouse: a click highlights a row (like the arrow keys), a double click goes into it, Create
   creates.
-- The space is made with `space.new {machine: "", folder}` and starts a terminal there. If the
+- The space is made with `space.new {machine, folder}` (`machine: ""` for this computer) and
+  starts a terminal there. If the
   folder is inside a Git repo but not its top, the space is named after the folder (Herdr would
   name it after the repo); otherwise it stays unnamed and follows its terminal.
 
@@ -55,7 +62,14 @@ A 520×454 card in the middle of the window, 16 px corners, the theme's `backgro
   (`kind: "dialog"`, `frame: "none"`, 520×454), `main.js`, `newspace.js` (the dialog),
   `folders.js` (listing, drives, the index and the search).
 - Open it with `mod.open {name: "huntaway-newspace"}`: from a key (`keys.json` here binds
-  `Ctrl+Shift+N` in place of Herdr's `space.new`), the palette, or another mod's button.
+  `Ctrl+Shift+N` in place of Herdr's `space.new`), the palette, or another mod's button. For a
+  given machine, open it with `openOverlay({mod: "huntaway-newspace", kind: "dialog", frame:
+  "none", width: 520, height: 454, props: {machine}})` (huntaway-spaces does, from a machine's `+`).
+- Another machine: asked once per machine (`exec({on})`): `sh -c 'printf "%s" "$HOME"'`, and
+  when it has no `sh` (Windows), one PowerShell for `$HOME` and the file-system drives. The answer
+  is kept in localStorage (`place:<machine>`), so later dialogs open at once and ask again behind.
+  Listing there: PowerShell on Windows, `sh` elsewhere; the index walks its home (six levels) and
+  the folders near its spaces with one PowerShell or `find` each, there.
 - Listing: `fs/promises` inside home; outside it, `sh` on macOS and Linux, and on Windows cmd's
   `dir /a:d-h /b` (about 0.2 s, any language), its output written UTF-16 (`cmd /u`) to a file in
   `.cache/huntaway-newspace/` and read back as bytes; PowerShell (UTF-8 output, about 2 s) only
@@ -63,7 +77,9 @@ A 520×454 card in the middle of the window, 16 px corners, the theme's `backgro
   Each folder is read once while the dialog is open, and the highlighted one is read ahead.
   The index walks home with `fs/promises` and the other places with one PowerShell script (or
   `find`) each.
-- Folders in use: `panes()` (each terminal's `cwd`) and `spaces()` (`folder`, this computer only).
+- Folders in use: `panes()` (each terminal's `cwd`) and `spaces()` (`folder`), only for spaces on
+  the dialog's machine: a pane belongs to a machine through its tab, not through what its path
+  looks like (two Windows machines both have `C:\`).
 - Programs it runs: `git rev-parse --show-toplevel` (to name the space), PowerShell, `sh` or `find`.
 
 ## Watch out

@@ -498,11 +498,11 @@ export default class Spaces extends View {
       .when(st === "done", (el) => el.child(div().size(6).mx(3).flex_none().rounded(3).bg(t.done)));
   }
 
-  // A new space on this computer starts in the New space dialog (huntaway-newspace): search or
-  // browse to its folder. Another machine's space starts in that machine's home, as before.
+  // A new space starts in the New space dialog (huntaway-newspace): search or browse to its
+  // folder on that machine (null: this computer). No machine given (the top +): the shown space's.
   newSpace(machine) {
-    if (machine) run("space.new", { machine });
-    else run("mod.open", { name: "huntaway-newspace" });
+    const props = machine === undefined ? {} : { machine: machine ?? "" };
+    openOverlay({ mod: "huntaway-newspace", kind: "dialog", frame: "none", width: 520, height: 454, props });
   }
 
   // The rail: each space is its colored letter tile, as in the full list; a dot on its corner
@@ -559,7 +559,7 @@ export default class Spaces extends View {
         .when(collapsed, el => el.pl(0).pr(0).justify_center())
         .when(!collapsed, el => el.child("Spaces"))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .tooltip("New space").on_click((_e, cx) => this.newSpace(null)).child(svg("mods/workspace-chrome/plus.svg").size(14))))
+          .tooltip("New space").on_click((_e, cx) => this.newSpace()).child(svg("mods/workspace-chrome/plus.svg").size(14))))
       .child(v_flex().id("space-list").relative().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
         // The selection slides from the space you left to the one you picked.

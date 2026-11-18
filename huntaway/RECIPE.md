@@ -68,7 +68,8 @@ Clicking a row focuses that agent. Empty, it says "All caught up".
 
 - Agent status comes from Herdr: working, blocked, done (until you look; then idle), idle.
 - Switching tabs or spaces slides the selection; `+` in Spaces or `Ctrl+Shift+N` (while this
-  layout shows) opens the New space dialog (`huntaway-newspace`).
+  layout shows) opens the New space dialog (`huntaway-newspace`) for the shown space's machine;
+  a machine header's `+` opens it for that machine.
 - Clicking a file in Files opens it in its own tab, or shows the tab it is already open in.
   Markdown tabs switch between Preview, Split and Code.
 - Changing the theme, or light and dark appearance, swaps the wallpaper and the rims within a second.

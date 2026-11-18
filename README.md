@@ -55,6 +55,8 @@ Made for Windows and macOS. Linux should work but is untested.
 - Type a few letters to find a folder under your home or near the spaces you have open.
 - `Enter` or Create starts a new space with a terminal in the folder shown at the bottom. A click
   highlights a folder; a double click goes into it.
+- It works on the machine of the space you are in, or the one whose `+` you clicked in Spaces
+  (its name shows beside the title): an ssh machine's folders are listed and searched there.
 
 ## huntaway-inbox
 

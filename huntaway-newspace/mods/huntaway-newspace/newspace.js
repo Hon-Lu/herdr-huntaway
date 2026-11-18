@@ -3,21 +3,26 @@
 // offers the open spaces' folders, home and the drives; a path lists that folder's subfolders;
 // words search the folder index. Up/Down put the highlighted folder in the field without
 // changing the list, Tab goes into it, Enter creates. The space starts with a terminal there.
+// The space goes on one machine: props.machine ("" for this computer), else the shown space's.
+// Everything listed and searched is on that machine.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { run, exec, theme, props, closeOverlay, home, spaces, panes } from "herdr";
-import { norm, isWin, listDirs, drives, folderIndex, searchFolders } from "./folders.js";
+import { run, exec, theme, props, closeOverlay, spaces, panes } from "herdr";
+import { norm, here, place, listDirs, drives, folderIndex, searchFolders } from "./folders.js";
 
 const W = 520, ROW = 40, ROWS = 7, SLIDE = { duration: 160, easing: "ease-out" };
 const isDark = c => { const m = /^#(..)(..)(..)/i.exec(c ?? ""); return !m || parseInt(m[1], 16) + parseInt(m[2], 16) + parseInt(m[3], 16) < 384; };
 
 // The dialog is 48 + 52 + ROWS * ROW + 12 + 60 + 2 = 454 px tall: keep mod.json's overlay in step.
 const key = p => norm(p).toLowerCase();
+// The machine the dialog is for: Windows or not, and its home. One dialog is open at a time.
+let at = { win: false, home: "" };
+const isWin = () => at.win;
 const sep = () => (isWin() ? "\\" : "/");
-const show = p => { const n = norm(p), h = norm(home()); const f = n === h ? "~" : n.toLowerCase().startsWith(h.toLowerCase() + "/") ? "~" + n.slice(h.length) : n; return isWin() ? f.replace(/\//g, "\\") : f; };
+const show = p => { const n = norm(p), h = at.home; const f = n === h ? "~" : n.toLowerCase().startsWith(h.toLowerCase() + "/") ? "~" + n.slice(h.length) : n; return isWin() ? f.replace(/\//g, "\\") : f; };
 const base = p => { const n = norm(p); return /^[a-z]:$/i.test(n) ? n.toUpperCase() + "\\" : n.split("/").pop() || n; };
 const join = (dir, name) => (dir.endsWith("/") ? dir : dir + "/") + name;
-const expand = q => { const t = q.trim(); return t === "~" || t.startsWith("~/") || t.startsWith("~\\") ? norm(home()) + norm(t.slice(1)) : norm(t); };
+const expand = q => { const t = q.trim(); return t === "~" || t.startsWith("~/") || t.startsWith("~\\") ? at.home + norm(t.slice(1)) : norm(t); };
 const looksLikePath = q => /^(~([\\/]|$)|\/|[a-z]:([\\/]|$))/i.test(q.trim());
 const isRoot = p => /^[a-z]:$|^\/$/i.test(norm(p));
 /** How a folder is written in the field: a drive or the root with its slash ("C:\"). */
@@ -31,6 +36,13 @@ export class NewSpace {
     this.browse = { dir: null, names: [] };
     this.lists = new Map();
     this.drives = [];
+    // props.machine: "" for this computer, a name for another; absent: the shown space's machine.
+    const asked = props()?.machine;
+    this.machine = typeof asked === "string" ? asked || null : (spaces() ?? []).find(s => s.active)?.machine ?? null;
+    // Another machine is asked what it is first (null until it answers).
+    this.place = this.machine ? null : here(); this.unreachable = false;
+    if (this.place) at = this.place;
+    this.index = null;
     // `query` is what was typed: the list follows it. The field can differ from it while a row
     // is highlighted (its path is shown there); `shown` is that text, so its change is ignored.
     this.query = props()?.query ?? ""; this.shown = null;
@@ -43,26 +55,42 @@ export class NewSpace {
       this.load(cx); cx.notify();
     });
     this.input.on("submit", (_e, cx) => this.create(this.target(), cx));
-    this.load(cx);
     this.input.focus();
     cx.timer.after(250, () => this.input?.focus());
-    cx.spawn(async cx => { this.drives = await drives(); cx.notify(); });
-    // The index fills in while the dialog is open; results follow it.
-    this.index = folderIndex(this.spaceFolders());
-    cx.timer.every(300, cx => { if (!this.index.done || !this.indexShown) { this.indexShown = this.index.done; cx.notify(); } });
+    if (this.place) this.ready(cx);
+    else cx.spawn(async cx => {
+      try { this.place = await place(this.machine); }
+      catch { this.unreachable = true; cx.notify(); return; }
+      if (!this.input) return;
+      at = this.place;
+      this.ready(cx); cx.notify();
+    });
+    cx.timer.every(300, cx => { if (this.index && (!this.index.done || !this.indexShown)) { this.indexShown = this.index.done; cx.notify(); } });
+  }
+
+  /** Once the machine is known: list what was typed, the drives, and start (or reuse) its index.
+   *  The index fills in while the dialog is open; results follow it. */
+  ready(cx) {
+    this.load(cx);
+    if (this.place.drives) this.drives = this.place.drives;
+    else cx.spawn(async cx => { this.drives = await drives(); cx.notify(); });
+    this.index = folderIndex(this.spaceFolders(), this.machine ? { on: this.machine, ...this.place } : null);
   }
 
   close() { this.input?.release(); this.input = null; }
 
-  /** Folders in use on this computer, each once: where the terminals are now, then where the
-   *  spaces start new ones. */
+  /** Folders in use on the dialog's machine, each once: where its spaces' terminals are now, then
+   *  where those spaces start new ones. Other machines' folders stay out, even when their paths
+   *  look like this machine's (two Windows machines both have C:\). */
   spaceFolders() {
     const seen = new Set(), out = [];
-    const local = f => (isWin() ? /^[a-z]:/i : /^\//).test(f);
-    const found = [...(panes() ?? []).map(p => p.cwd), ...(spaces() ?? []).filter(s => !s.machine).map(s => s.folder)];
+    const absolute = f => (isWin() ? /^[a-z]:/i : /^\//).test(f);
+    const mine = (spaces() ?? []).filter(s => (s.machine ?? null) === this.machine);
+    const tabs = new Set(mine.flatMap(s => s.tabs.map(t => t.id)));
+    const found = [...(panes() ?? []).filter(p => tabs.has(p.tab)).map(p => p.cwd), ...mine.map(s => s.folder)];
     for (const raw of found) {
       const f = norm(raw ?? "");
-      if (f && local(f) && !seen.has(key(f))) { seen.add(key(f)); out.push(f); }
+      if (f && absolute(f) && !seen.has(key(f))) { seen.add(key(f)); out.push(f); }
     }
     return out;
   }
@@ -83,7 +111,7 @@ export class NewSpace {
   list(dir, hidden) {
     const k = key(dir) + (hidden ? "|hidden" : "");
     if (!this.lists.has(k)) {
-      const reading = listDirs(dir, { hidden }).then(names => { this.lists.set(k, names); return names; });
+      const reading = listDirs(dir, { hidden, on: this.machine, win: isWin() }).then(names => { this.lists.set(k, names); return names; });
       this.lists.set(k, reading);
     }
     return this.lists.get(k);
@@ -91,7 +119,7 @@ export class NewSpace {
 
   /** For a typed path: list its folder (once per folder; typing a name only filters). */
   load(cx) {
-    if (!looksLikePath(this.query)) return;
+    if (!this.place || !looksLikePath(this.query)) return;
     const { dir, rest } = this.typed(), hidden = rest.startsWith(".");
     if (key(dir) === key(this.browse.dir ?? "") && this.browse.names && this.browse.hidden === hidden) return;
     const token = (this.token ?? 0) + 1; this.token = token;
@@ -109,6 +137,7 @@ export class NewSpace {
   items() {
     const q = this.query;
     const row = f => ({ kind: "folder", folder: f });
+    if (!this.place) return [{ kind: "empty", text: this.unreachable ? `Can't reach ${this.machine}` : `Connecting to ${this.machine}…` }];
     if (looksLikePath(q)) {
       const { dir, rest } = this.typed(), low = rest.toLowerCase();
       const names = key(dir) === key(this.browse.dir ?? "") ? this.browse.names : null;
@@ -123,7 +152,7 @@ export class NewSpace {
     }
     // Nothing typed: places to start from.
     const seen = new Set(), list = [];
-    for (const f of [...this.spaceFolders(), norm(home()), ...this.drives]) {
+    for (const f of [...this.spaceFolders(), at.home, ...this.drives]) {
       if (!seen.has(key(f))) { seen.add(key(f)); list.push(row(f)); }
     }
     return list;
@@ -134,8 +163,9 @@ export class NewSpace {
    * at a folder ("C:\Code\"); else the first row (the best match).
    */
   target() {
-    const items = this.items(), at = items[this.at];
-    if (at?.folder) return at.folder;
+    if (!this.place) return null;
+    const items = this.items(), lit = items[this.at];
+    if (lit?.folder) return lit.folder;
     if (looksLikePath(this.query) && this.typed().rest === "") return this.typed().dir;
     return this.query.trim() ? items.find(it => it.folder)?.folder ?? null : null;
   }
@@ -190,11 +220,11 @@ export class NewSpace {
     cx.spawn(async () => {
       let name = null;
       try {
-        const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd: fsFolder, timeout: 3000 });
+        const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd: fsFolder, on: this.machine, timeout: this.machine ? 8000 : 3000 });
         const top = r.code === 0 ? r.stdout.trim() : "";
         if (top && key(top) !== key(folder)) name = base(folder);
       } catch {}
-      run("space.new", { machine: "", folder: fsFolder, ...(name ? { name } : {}) });
+      run("space.new", { machine: this.machine ?? "", folder: fsFolder, ...(name ? { name } : {}) });
       this.done();
     });
   }
@@ -253,12 +283,16 @@ export class NewSpace {
           .child(div().truncate().text_size(11).text_color(t.dim).child(field(it.folder))))
         .when(on, el => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child("Tab open · ↵ create")));
     };
-    const hint = looksLikePath(this.query) ? "⇧Tab up a folder" : !this.index.done ? `Indexing ${this.index.folders.length.toLocaleString()} folders…` : "";
+    const hint = !this.place ? "" : looksLikePath(this.query) ? "⇧Tab up a folder" : this.index && !this.index.done ? `Indexing ${this.index.folders.length.toLocaleString()} folders…` : "";
 
     return v_flex().id("new-space").size_full().rounded(16).overflow_hidden().border_1().border_color(rim).bg(t.background).text_color(t.foreground)
       .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
       .child(h_flex().h(48).flex_none().px(18).gap(12).items_center()
-        .child(div().flex_1().text_size(14).font_semibold().child("New space"))
+        .child(h_flex().flex_1().min_w(0).gap(8).items_center()
+          .child(div().flex_none().text_size(14).font_semibold().child("New space"))
+          // Another machine's name beside the title, with its server icon.
+          .when(Boolean(this.machine), el => el.child(h_flex().min_w(0).gap(5).items_center().text_size(12).text_color(t.dim)
+            .child(icon("server", t.dim)).child(div().truncate().child(this.machine ?? "")))))
         .when(Boolean(hint), el => el.child(div().text_size(11).text_color(t.dim).child(hint)))
         .child(div().text_size(11).text_color(t.dim).child("Esc")))
       .child(h_flex().h(40).mx(12).mb(12).px(12).gap(8).flex_none().items_center().rounded(10).border_1().border_color(lit + "59").bg(t.surface)
