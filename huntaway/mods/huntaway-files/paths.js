@@ -39,8 +39,13 @@ export function extname(name) {
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
 }
 
-/** A comparison key: case-folded on local Windows. */
-export const key = (p, on) => localWindows(on) ? p.toLowerCase() : p;
+/** A Windows path, told by its spelling: a drive ("C:/…") or a share ("//server/share"). */
+export const winPath = p => /^[a-z]:\//i.test(p ?? "") || /^\/\/[^/]/.test(p ?? "");
+/** Whether a path is on Windows: this computer's kind, or for another machine its spelling. */
+const windowsAt = (p, on) => on ? winPath(p) : isWindows();
+
+/** A comparison key: case-folded on Windows, here or on another machine. */
+export const key = (p, on) => windowsAt(p, on) ? p.toLowerCase() : p;
 export function contains(parent, child, on) {
   const a = key(parent, on), b = key(child, on);
   return a === b || b.startsWith(a.endsWith("/") ? a : a + "/");
@@ -51,21 +56,26 @@ export function relative(root, p, on) {
   return p.slice(root.length + (root.endsWith("/") ? 0 : 1));
 }
 
-/** What a person sees and copies: backslashes on local Windows. */
-export const display = (p, on) => p && localWindows(on) ? p.replace(/\//g, "\\") : p;
+/** What a person sees and copies: backslashes on Windows, here or on another machine. */
+export const display = (p, on) => p && windowsAt(p, on) ? p.replace(/\//g, "\\") : p;
 
 export function homeDir() { return norm(home()); }
+/** Other machines' home folders, once known (system.js remoteHome()). */
+const homes = new Map();
+export const setRemoteHome = (on, h) => { if (on && h) homes.set(on, norm(h)); };
 export function underHome(p, on) {
   if (on || !p) return false;
   const h = homeDir();
   return Boolean(h) && contains(h, p, on);
 }
-/** ~/Desktop/x for paths in the home folder. */
+/** ~/Desktop/x for paths in the home folder (another machine's, once known). */
 export function friendly(p, on) {
   if (!p) return "";
-  if (!on && underHome(p, on)) {
-    const rel = relative(homeDir(), p, on);
-    return rel ? `~/${rel}` : "~";
+  const h = on ? homes.get(on) : homeDir();
+  if (h && contains(h, p, on)) {
+    const rel = relative(h, p, on);
+    // display() can't tell "~/…" is another machine's Windows path: spell it so here.
+    return !rel ? "~" : on && winPath(h) ? `~\\${rel.replace(/\//g, "\\")}` : `~/${rel}`;
   }
   return p;
 }

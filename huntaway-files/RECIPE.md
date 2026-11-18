@@ -90,6 +90,11 @@ A file tab (one per file; opening it again shows the same tab):
 
 - The tree follows the focused terminal's folder (in another machine's terminal, that machine's
   files) and refreshes itself when files change; F5 or the button refreshes by hand.
+- Another machine's folder can't be watched, and each read there is a few programs over ssh, so
+  it is read again only while the panel shows and the machine is online: every 10 s while an
+  agent in the space is working, at once when the space's status changes (an agent finished) or
+  the panel shows again, else every minute. Its files open read-only (no Edit, no image preview,
+  no "Open with its app"); a file tab shows its folder from that machine's home (`~`).
 - Expanded folders are remembered per root. Hidden items show at first; hiding them is remembered
   for every folder.
 - Keys in the tree: arrows, Page Up/Down, Home/End, Enter (open), Left/Right (fold), F2 (rename),
@@ -131,12 +136,15 @@ A file tab (one per file; opening it again shows the same tab):
   once: on this Windows machine cmd's `dir` (about 0.2 s, any language), its output written
   UTF-16 (`cmd /u`) to a file in `.cache/huntaway-files/` and read back as bytes; PowerShell
   (about 2 s) only for a folder cmd can't read or whose path has cmd's symbols in it; `sh` on
-  macOS, Linux and other machines.
+  macOS, Linux and other machines, except another machine whose paths are Windows ones (`C:/…`,
+  `//server/share`): it has no `sh`, so everything there (listing, times, search, new, rename,
+  delete) goes straight to PowerShell, and its paths compare case-insensitively and show with
+  backslashes. Another machine's home is asked once (`$HOME`) and kept in localStorage.
 - Modified times come apart from the listing, which stays fast: Herdr's `fs` has no `stat` and
   cmd's `dir` writes dates in the system's language, so one PowerShell call on Windows
   (`LastWriteTimeUtc`) or `stat` (GNU `-c %Y`, BSD `-f %m`) elsewhere reads them for every folder
   that asked, at most once every 3 s. The names show at once; the dates follow.
-- Programs it runs: `git` (`status --branch` for marks and ahead/behind, `branch --show-current`,
+- Programs it runs: `git` (`status --branch` for marks, the branch and ahead/behind,
   `diff HEAD --numstat` for line counts, `ls-files` for search), cmd, PowerShell or `sh`, `explorer.exe` /
   `open` / `xdg-open`. On Windows, "Open with its app" and the folder button use `explorer.exe`
   (after cmd's `if exist`, since Explorer opens Documents for a missing path) and links use

@@ -7,6 +7,7 @@ import { Panel } from "./panel.js";
 import { Menu, Dialog } from "./menu.js";
 import { Preview } from "./preview.js";
 import { openInTab } from "./open.js";
+import { remoteHome } from "./system.js";
 import { basename, dirname, display, friendly, norm } from "./paths.js";
 
 /** A file in its own tab. */
@@ -24,6 +25,8 @@ class Viewer {
     this.handle = handle; this.preview = new Preview();
     this.preview.open(norm(p.file), p.on ?? null, cx);
     if (!p.on) this.watch(dirname(this.preview.path), cx);
+    // Another machine's file: its folder is shown from that machine's home (~) once known.
+    else cx.spawn(async cx => { if (await remoteHome(p.on, this.preview.path)) cx.notify(); });
   }
   watch(dir, cx) {
     const preview = this.preview, file = preview.path.toLowerCase();

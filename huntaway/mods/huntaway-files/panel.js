@@ -2,9 +2,9 @@
 // marks and live refresh. Files open in a tab of their own.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
-import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, run, window as appWindow } from "herdr";
+import { spaces, panes, focused, theme, watchFolder, shared, openOverlay, notify, run, machines, layout, window as appWindow } from "herdr";
 import { norm, join, dirname, basename, key, contains, relative, display, homeDir, compareEntries, isRoot, isWindows } from "./paths.js";
-import { listFolders, fileTimes, fileIndex, rank, gitTop, gitBranch, gitStatus, gitLines, openDefault, MAX_PER_FOLDER } from "./system.js";
+import { listFolders, fileTimes, fileIndex, rank, gitTop, gitStatus, gitLines, openDefault, MAX_PER_FOLDER } from "./system.js";
 import { openInTab } from "./open.js";
 import { menuHeight } from "./menu.js";
 import { MOD, REQUEST, icon, iconButton, glass, rim, fileLook, markColor, MARK_LABEL } from "./ui.js";
@@ -38,6 +38,21 @@ function when(ms) {
 function read(name, fallback) { try { const v = localStorage.getItem(name); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } }
 function write(name, value) { try { localStorage.setItem(name, JSON.stringify(value)); } catch {} }
 
+/**
+ * Whether the Files panel shows in the layout: its block and everything around it not hidden,
+ * and each stack on the way showing it. null when the layout has no such block (a copy elsewhere).
+ */
+function shownInLayout(node) {
+  if (!node || typeof node !== "object") return null;
+  if (node.content?.mod === "huntaway-files") return !node.hidden;
+  for (const child of node.children ?? []) {
+    const inside = shownInLayout(child);
+    if (inside === null) continue;
+    return inside && !node.hidden && (node.type !== "stack" || !node.active || node.active === child.id);
+  }
+  return null;
+}
+
 /** The folder the panel shows: the focused terminal's, else the space's. */
 function followed(previous) {
   const space = spaces().find(s => s.active), f = focused();
@@ -69,7 +84,30 @@ export class Panel {
     this.search.on("focus", (_e, cx) => { this.searchFocused = true; cx.notify(); });
     this.search.on("blur", (_e, cx) => { this.searchFocused = false; cx.notify(); });
     this.sync(cx);
-    cx.timer.every(10000, cx => { if (this.ctx?.on || this.watchFailed) this.refresh(cx, { quiet: true }); });
+    cx.timer.every(10000, cx => this.tick(cx));
+  }
+
+  /**
+   * Every 10 s: read again what watching can't follow. This computer only when its watch failed.
+   * Another machine can't be watched, and each read there is a few programs over ssh, so only
+   * while the panel shows and the machine is online: every 10 s while an agent in the space is
+   * working, at once when the space's status changes (an agent finished), else every minute.
+   */
+  tick(cx) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!ctx.on) { if (this.watchFailed) this.refresh(cx, { quiet: true }); return; }
+    const status = spaces().find(s => s.id === ctx.space)?.status ?? null;
+    const statusChanged = status !== this.remoteStatus;
+    this.remoteStatus = status;
+    const shown = shownInLayout(layout()) !== false, reappeared = shown && this.remoteHidden;
+    this.remoteHidden = !shown;
+    if (!shown) return;
+    if (machines().find(m => m.name === ctx.on)?.layout === "unavailable") return;
+    const due = (this.remoteAt ?? 0) + (status === "working" ? 10000 : 60000) - 500;
+    if (!statusChanged && !reappeared && Date.now() < due) return;
+    this.remoteAt = Date.now();
+    this.refresh(cx, { quiet: true });
   }
 
   close() { this.ctx = null; }
@@ -89,6 +127,8 @@ export class Panel {
     const saved = next ? read("open", {})[key(next.root, next.on)] : null;
     this.open = new Set((saved ?? []).map(rel => join(next.root, rel)));
     if (!next) return;
+    // Just read: the remote timer (tick) starts from here.
+    this.remoteAt = Date.now(); this.remoteStatus = spaces().find(s => s.id === next.space)?.status ?? null;
     this.load([next.root, ...this.open], cx);
     this.refreshGit(cx);
     this.watch(cx);
@@ -224,7 +264,8 @@ export class Panel {
         const top = this.git?.root === ctx.root ? this.git.top : await gitTop(ctx.root, ctx.on);
         if (this.ctx !== ctx) return;
         if (!top) { this.git = { root: ctx.root, top: null }; this.marks = new Map(); this.inherit = new Map(); this.folderMarks = new Map(); this.lines = new Map(); return; }
-        const [status, branch, changes] = await Promise.all([gitStatus(top, ctx.on), gitBranch(top, ctx.on), gitLines(top, ctx.on)]);
+        const [status, changes] = await Promise.all([gitStatus(top, ctx.on), gitLines(top, ctx.on)]);
+        const branch = status?.branch ?? null;
         if (this.ctx !== ctx) return;
         const marks = new Map(), inherit = new Map(), folders = new Map(), lines = new Map();
         // The summary under the header counts what changed inside the shown folder only.

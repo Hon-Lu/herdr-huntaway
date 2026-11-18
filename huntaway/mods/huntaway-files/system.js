@@ -14,7 +14,7 @@
 // quotes or non-ASCII characters never pass through a command line.
 import * as fs from "fs/promises";
 import { exec, readTextFile, writeTextFile, appHome } from "herdr";
-import { norm, join, dirname, basename, extname, isWindows, isMac, localWindows, underHome, display, key } from "./paths.js";
+import { norm, join, dirname, basename, extname, isWindows, isMac, localWindows, underHome, display, key, winPath, setRemoteHome } from "./paths.js";
 
 export const MAX_PER_FOLDER = 5000;
 
@@ -56,8 +56,31 @@ export async function sh(script, args, { on = null, timeout = 30000 } = {}) {
   if (r.code !== 0) throw new Error(r.stderr.trim() || r.stdout.trim() || "Command failed");
   return r.stdout;
 }
-/** Remote Windows machines have no sh. */
-const noShell = e => /cannot start sh|program not found|not recognized/i.test(String(e));
+/** Another machine runs Windows when its paths are spelled that way: it has no sh, so everything
+ *  there goes to PowerShell at once (trying sh first costs a round trip each time). */
+const remoteWindows = (on, path) => Boolean(on) && winPath(path);
+
+const remoteHomes = new Map();
+/**
+ * Another machine's home folder (`path`: any path there, to tell its kind), asked once and kept
+ * in localStorage; paths.js friendly() uses it from then on. null when it can't say.
+ */
+export function remoteHome(on, path) {
+  if (!on) return Promise.resolve(null);
+  let saved = null;
+  try { saved = localStorage.getItem(`home:${on}`); } catch {}
+  if (saved) { setRemoteHome(on, saved); return Promise.resolve(saved); }
+  if (!remoteHomes.has(on)) {
+    remoteHomes.set(on, (async () => {
+      const h = (remoteWindows(on, path) ? await powershell("[Console]::Out.Write($HOME)", { on }) : await sh('printf "%s" "$HOME"', [], { on })).trim();
+      if (!h) throw new Error("No home folder");
+      try { localStorage.setItem(`home:${on}`, h); } catch {}
+      setRemoteHome(on, h);
+      return h;
+    })().catch(() => { remoteHomes.delete(on); return null; }));
+  }
+  return remoteHomes.get(on);
+}
 
 // ---- listing ---------------------------------------------------------------
 
@@ -194,16 +217,14 @@ async function listByProgram(paths, on) {
       const batch = [];
       let size = 0;
       while (i < paths.length && (batch.length === 0 || size + paths[i].length < 2500)) { size += paths[i].length; batch.push(paths[i++]); }
-      parsePowerShell(await powershell(PS_LIST(batch.map(p => display(p, null))), { on }), out);
+      parsePowerShell(await powershell(PS_LIST(batch.map(p => display(p, on))), { on }), out);
     }
   };
   if (localWindows(on)) {
     const left = await listByCmd(paths, out);
     if (left.length) await viaPowerShell(left);
-  } else {
-    try { parseShell(await sh(SH_LIST, paths, { on }), out); }
-    catch (e) { if (on && noShell(e)) await viaPowerShell(paths); else throw e; }
-  }
+  } else if (remoteWindows(on, paths[0])) await viaPowerShell(paths);
+  else parseShell(await sh(SH_LIST, paths, { on }), out);
   // PowerShell reports Windows spelling; map back to the requested paths.
   const result = new Map();
   for (const p of paths) result.set(p, out.get(norm(p)) ?? [...out.entries()].find(([k]) => key(k, on) === key(p, on))?.[1] ?? { entries: [], error: "Cannot read this folder" });
@@ -260,11 +281,8 @@ export async function fileTimes(paths, on) {
   const out = new Map();
   let text;
   try {
-    if (localWindows(on)) text = await powershell(PS_TIMES(paths.map(p => display(p, null))));
-    else {
-      try { text = await sh(SH_TIMES, paths, { on }); }
-      catch (e) { if (on && noShell(e)) text = await powershell(PS_TIMES(paths.map(p => display(p, null))), { on }); else throw e; }
-    }
+    if (localWindows(on) || remoteWindows(on, paths[0])) text = await powershell(PS_TIMES(paths.map(p => display(p, on))), { on });
+    else text = await sh(SH_TIMES, paths, { on });
   } catch { return out; }
   let current = null;
   for (const line of text.split(/\r?\n/)) {
@@ -311,7 +329,7 @@ export async function fileIndex(root, on, gitTop) {
     }
     return { files: files.slice(0, INDEX_LIMIT), limited: files.length >= INDEX_LIMIT || queue.length > 0 };
   }
-  if (localWindows(on)) {
+  if (localWindows(on) || remoteWindows(on, root)) {
     const skip = [...SKIP].map(psq).join(",");
     const text = await powershell(`$skip = [Collections.Generic.HashSet[string]]::new([string[]]@(${skip}), [StringComparer]::OrdinalIgnoreCase)
       $root = ${psq(display(root, on))}; $q = [Collections.Generic.Queue[string]]::new(); $q.Enqueue($root); $n = 0
@@ -364,25 +382,23 @@ export async function gitTop(root, on) {
     return r.code === 0 ? norm(r.stdout.trim()) : null;
   } catch { return null; }
 }
-export async function gitBranch(top, on) {
-  try {
-    const r = await exec("git", [...GIT, "branch", "--show-current"], { cwd: top, on, timeout: 10000 });
-    return r.code === 0 ? r.stdout.trim() || null : null;
-  } catch { return null; }
-}
 /**
  * Git status: `files` is Map(relative path -> mark), marks M modified, A added, D deleted,
  * R renamed, U untracked, C conflict, I ignored; paths ending in "/" are folders. With them the
- * branch's upstream (`origin/main`) and how far ahead and behind it the branch is.
+ * branch (null when detached), its upstream (`origin/main`) and how far ahead and behind it is:
+ * all from the status's own branch line, so no other git call is needed.
  */
 export async function gitStatus(top, on) {
   const r = await exec("git", [...GIT, "status", "--porcelain=v1", "-z", "--branch", "--no-renames", "--untracked-files=normal", "--ignored=matching"], { cwd: top, on, timeout: 20000 });
   if (r.code !== 0) return null;
-  const files = new Map(), out = { files, upstream: null, ahead: 0, behind: 0 };
+  const files = new Map(), out = { files, branch: null, upstream: null, ahead: 0, behind: 0 };
   let n = 0;
   for (const entry of r.stdout.split("\0")) {
-    // "## main...origin/main [ahead 2, behind 1]"
+    // "## main...origin/main [ahead 2, behind 1]", "## main", "## No commits yet on main",
+    // "## HEAD (no branch)".
     if (entry.startsWith("## ")) {
+      const head = entry.slice(3).replace(/^(No commits yet|Initial commit) on /, "");
+      out.branch = /^HEAD \(no branch\)/.test(head) ? null : head.split(/\.\.\.| \[/)[0].trim() || null;
       const m = /^## .*?(?:\.\.\.(\S+))?(?: \[(.*)\])?$/.exec(entry);
       out.upstream = m?.[1] ?? null;
       out.ahead = Number(/ahead (\d+)/.exec(m?.[2] ?? "")?.[1] ?? 0);
@@ -600,8 +616,8 @@ export async function createFile(path, on) {
     try { await writeTextFile(path, "", null); return; }
     catch (e) { throw new Error(/stale|exist|snapshot|changed outside/i.test(String(e)) ? "A file or folder with this name already exists" : String(e?.message ?? e)); }
   }
-  try { await sh('[ -e "$1" ] && { echo "A file or folder with this name already exists" >&2; exit 1; }; : > "$1"', [path], { on }); }
-  catch (e) { if (noShell(e)) await powershell(`if (Test-Path -LiteralPath ${psq(path)}) { throw "A file or folder with this name already exists" }; New-Item -ItemType File -Path ${psq(path)} | Out-Null`, { on }); else throw e; }
+  if (remoteWindows(on, path)) await powershell(`if (Test-Path -LiteralPath ${psq(display(path, on))}) { throw "A file or folder with this name already exists" }; New-Item -ItemType File -Path ${psq(display(path, on))} | Out-Null`, { on });
+  else await sh('[ -e "$1" ] && { echo "A file or folder with this name already exists" >&2; exit 1; }; : > "$1"', [path], { on });
 }
 
 export async function createFolder(path, on) {
@@ -609,8 +625,8 @@ export async function createFolder(path, on) {
     await powershell(`$p = ${psq(display(path, on))}; if (Test-Path -LiteralPath $p) { throw "A file or folder with this name already exists" }; [void][IO.Directory]::CreateDirectory($p)`);
     return;
   }
-  try { await sh('[ -e "$1" ] && { echo "A file or folder with this name already exists" >&2; exit 1; }; mkdir -- "$1"', [path], { on }); }
-  catch (e) { if (on && noShell(e)) await powershell(`if (Test-Path -LiteralPath ${psq(path)}) { throw "A file or folder with this name already exists" }; [void][IO.Directory]::CreateDirectory(${psq(path)})`, { on }); else throw e; }
+  if (remoteWindows(on, path)) await powershell(`$p = ${psq(display(path, on))}; if (Test-Path -LiteralPath $p) { throw "A file or folder with this name already exists" }; [void][IO.Directory]::CreateDirectory($p)`, { on });
+  else await sh('[ -e "$1" ] && { echo "A file or folder with this name already exists" >&2; exit 1; }; mkdir -- "$1"', [path], { on });
 }
 
 export async function rename(path, newPath, on) {
@@ -624,8 +640,10 @@ export async function rename(path, newPath, on) {
     return;
   }
   const guard = caseOnly ? "" : '[ -e "$2" ] && { echo "A file or folder with this name already exists" >&2; exit 1; }; ';
-  try { await sh(`${guard}mv -- "$1" "$2"`, [path, newPath], { on }); }
-  catch (e) { if (on && noShell(e)) await powershell(`Move-Item -LiteralPath ${psq(path)} -Destination ${psq(newPath)}`, { on }); else throw e; }
+  if (remoteWindows(on, path)) await powershell(`$a = ${psq(display(path, on))}; $b = ${psq(display(newPath, on))}
+      ${caseOnly ? "" : 'if (Test-Path -LiteralPath $b) { throw "A file or folder with this name already exists" }'}
+      Move-Item -LiteralPath $a -Destination $b`, { on });
+  else await sh(`${guard}mv -- "$1" "$2"`, [path, newPath], { on });
 }
 
 /** Moves to the Recycle Bin / Trash where there is one; remote machines delete for good. */
@@ -648,8 +666,8 @@ export async function remove(path, dir, on) {
   if (!on) {
     try { await sh('command -v gio >/dev/null && gio trash -- "$1"', [path], { timeout: 120000 }); return "trash"; } catch {}
   }
-  try { await sh('rm -rf -- "$1"', [path], { on, timeout: 120000 }); }
-  catch (e) { if (on && noShell(e)) await powershell(`Remove-Item -LiteralPath ${psq(path)} -Recurse -Force`, { on, timeout: 120000 }); else throw e; }
+  if (remoteWindows(on, path)) await powershell(`Remove-Item -LiteralPath ${psq(display(path, on))} -Recurse -Force`, { on, timeout: 120000 });
+  else await sh('rm -rf -- "$1"', [path], { on, timeout: 120000 });
   return "deleted";
 }
 
