@@ -6,7 +6,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, agents, setAgentOrder, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { spaces, machines, panes, agents, terminals, setAgentOrder, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 
 // Frosted glass on dark themes: card fills let the blurred wallpaper through. Light themes stay
 // nearly solid, so terminal text keeps its contrast on white.
@@ -33,12 +33,63 @@ function place(s, ps) {
 const rowHeight = ({ tree }) => (tree ? 32 : 36);
 
 // A space's agents sit under it, one row each: the agents list lives here, not in a card of its own.
+// An agent another agent started (`hc run`, its `parent`) sits under that one with tree lines,
+// and only there, even when it has a pane of its own. Started agents without a pane
+// (`hc run --bg`) are listed there too.
 const AGENT_H = 28;
 const cleanTitle = (s) => (s ?? "").replace(/^[^\p{L}\p{N}~/]+/u, "").trim();
+// A pane-less sub-agent's raw word, error counting as blocked. It's never done: it reports
+// to its parent, and the parent's done is the news.
+const kidStatus = (s) => (s === "error" ? "blocked" : s === "done" ? "idle" : s);
+// space -> rows { a, lines, sub, paneless }, each top agent followed by its tree, depth first.
 function agentsBySpace() {
+  const listed = agents(), all = terminals();
+  const byAddr = new Map(listed.map((a) => [a.address, a]));
+  const term = new Map(all.map((k) => [k.address, k]));
+  const paneless = all.filter((k) => !byAddr.has(k.address) && k.state === "live" && k.program?.agent && k.parent);
+  const shown = new Set([...byAddr.keys(), ...paneless.map((k) => k.address)]);
+  // The nearest ancestor that is drawn (a plain shell between them doesn't count).
+  const lead = (addr) => {
+    const seen = new Set([addr]);
+    for (let p = term.get(addr)?.parent; p && !seen.has(p); p = term.get(p)?.parent) {
+      if (shown.has(p)) return p;
+      seen.add(p);
+    }
+    return null;
+  };
+  // Whether a line of drawn ancestors reaches an agent with a pane.
+  const rooted = (addr) => {
+    const seen = new Set();
+    for (let p = addr; p && !seen.has(p); p = lead(p)) { if (byAddr.has(p)) return true; seen.add(p); }
+    return false;
+  };
+  const kids = new Map();
+  const tops = [];
+  for (const a of listed) {
+    const p = lead(a.address);
+    if (p && rooted(p)) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(a); } else tops.push(a);
+  }
+  for (const k of paneless) {
+    const p = lead(k.address);
+    if (p && rooted(p)) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push({ ...k, paneless: true }); }
+  }
+  const tree = (addr, lead, seen) => {
+    const list = (kids.get(addr) ?? []).filter((k) => !seen.has(k.address));
+    return list.flatMap((k, i) => {
+      const last = i === list.length - 1;
+      seen.add(k.address);
+      return [
+        { a: k, lines: [...lead, last ? "└" : "├"], sub: true, paneless: Boolean(k.paneless), name: term.get(k.address)?.name },
+        ...tree(k.address, [...lead, last ? "" : "│"], seen),
+      ];
+    });
+  };
+  tops.sort((a, b) => a.tab_index - b.tab_index || a.seq - b.seq);
   const by = new Map();
-  for (const a of agents()) { if (!by.has(a.space)) by.set(a.space, []); by.get(a.space).push(a); }
-  for (const list of by.values()) list.sort((a, b) => a.tab_index - b.tab_index || a.seq - b.seq);
+  for (const a of tops) {
+    if (!by.has(a.space)) by.set(a.space, []);
+    by.get(a.space).push({ a, lines: [], sub: false, paneless: false }, ...tree(a.address, [], new Set([a.address])));
+  }
   return by;
 }
 function agentName(a) {
@@ -484,15 +535,21 @@ export default class Spaces extends View {
       );
   }
 
-  agentRow(a, t) {
-    const program = a.program, st = a.status;
+  // A sub-agent's row: a 14 px cell per level, its line under the icon of the agent above.
+  agentRow({ a, lines, sub, paneless, name }, t) {
+    const program = a.program, st = paneless ? kidStatus(a.status) : a.status;
     const pic = program?.icon ? (program.tint ? svg(program.icon).size(13).flex_none().text_color(t.dim) : image(program.icon).size(13).flex_none()) : div().size(5).mx(4).flex_none().rounded(3).bg(t.dim);
-    return h_flex().id(`agent-${a.address}`).h(AGENT_H).flex_none().pl(36).pr(8).gap(8).items_center().rounded(8).cursor_pointer()
+    const cell = (l) => div().relative().w(14).h(AGENT_H).flex_none()
+      .when(l === "│" || l === "├", (el) => el.child(div().absolute().left(6).top(0).bottom(0).w(1.5).bg(t.input)))
+      .when(l === "└" || l === "├", (el) => el.child(div().absolute().left(6).top(0).w(6).h(AGENT_H / 2).border_l(1.5).border_b(1.5).border_color(t.input).rounded_bl(5)));
+    return h_flex().id(`agent-${a.address}`).h(AGENT_H).flex_none().pl(36).pr(8).items_center().rounded(8).cursor_pointer()
       .text_size(12.5).text_color(a.focused ? t.foreground : t.muted)
       .hover((s) => s.bg(t.hover).text_color(t.foreground)).active((s) => s.opacity(0.75))
-      .on_click(() => run("pane.focus", { pane: a.pane }))
-      .child(pic)
-      .child(div().flex_1().min_w(0).truncate().child(agentName(a)))
+      // Without a pane there is nothing to focus: peek at it over the tab instead.
+      .on_click(() => (paneless ? run("terminal.peek", { terminal: a.address }) : run("pane.focus", { pane: a.pane })))
+      .children(lines.map(cell))
+      .child(div().mr(8).flex_none().child(pic))
+      .child(div().flex_1().min_w(0).mr(8).truncate().child(sub ? name || (paneless ? a.template || program?.name || a.address : agentName(a)) : agentName(a)))
       .when(st === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
       .when(st === "blocked", (el) => el.child(div().flex_none().px(6).h(17).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
       .when(st === "done", (el) => el.child(div().size(6).mx(3).flex_none().rounded(3).bg(t.done)));
@@ -550,7 +607,7 @@ export default class Spaces extends View {
     if (changed) setShared("space.colors", kept);
     this.byAgents = agentsBySpace();
     // agent.next / agent.prev follow the list as shown: space by space, top to bottom.
-    setAgentOrder(this.ordered().flatMap(r => (this.byAgents.get(r.w.id) ?? []).map(a => a.address)));
+    setAgentOrder(this.ordered().flatMap(r => (this.byAgents.get(r.w.id) ?? []).filter(x => !x.paneless).map(x => x.a.address)));
     const slot = this.selectedSlot(collapsed);
     this.sliding = Boolean(slot);
     // Its own card: rounded to sit inside the layout node's 14 px corners and 1 px border.

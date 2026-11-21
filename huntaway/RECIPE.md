@@ -27,6 +27,11 @@ Left column, 268 px (folds to a 44 px rail; 76 on macOS):
   - Under each space, its agents, one 28 px row each, indented to the name: the program's icon,
     the agent's title, and on the right a spinner (`working`), a `Needs you` pill in the
     `blocked` color (`blocked`), a dot in the `done` color (`done`), nothing when `idle`.
+  - An agent another agent started (`hc run`) sits under that agent instead, as a tree: 1.5 px
+    `input`-colored lines (`├` `└` `│`) in a 14 px cell per level, under the icon above, and its
+    terminal name (`gl-228`). It is listed only there, never also as a row of its own, even when
+    it has a pane (in any space). Started agents without a pane (`hc run --bg`) show there too;
+    their `done` reads as idle (the parent's done is the news) and clicking one peeks at it.
   - The selected space has a `selected` fill that slides (200 ms, ease-out) to the space you pick.
   - Folded to the rail: each space is its 22 px letter tile (dimmed unless selected), with a dot
     on its corner when an agent there is working, done or blocked; the selection slides there too.
@@ -96,7 +101,7 @@ Clicking a row focuses that agent. Empty, it says "All caught up".
     also keeps the look in step with the theme: it rewrites the layout (`layout.set`) when the
     pane frame's fill, the card rims, the focus rim or the wallpaper don't match the theme.
   - `huntaway-spaces` (clone of `spaces`): cards, agents under spaces (`agents()`,
-    `setAgentOrder` in the order shown), the sliding selection, the rail tiles, `+` runs
+    sub-agents nested by `terminals()`' `parent`, `setAgentOrder` in the order shown), the sliding selection, the rail tiles, `+` runs
     `mod.open {name: "huntaway-newspace"}` (another machine: `space.new {machine}`).
   - `huntaway-tabs` (written for this layout): the tab card, sliding selection and drag line
     (`transition`), the breathing blocked tab (`loop`), the right-hand card, per-space panel memory.

@@ -19,7 +19,8 @@ Made for Windows and macOS. Linux should work but is untested.
 
 - Frosted cards over a soft wallpaper, in a dark and a light version that follow your theme.
 - Tabs and spaces have a selection that slides as you switch. Drag tabs to reorder them.
-- Each space lists its agents underneath, with what they're doing.
+- Each space lists its agents underneath, with what they're doing. Agents another agent started
+  sit under it as a tree, listed once.
 - Each pane's header shows its terminal's address (`t38`). Click it to copy the address and
   paste it to an agent, which can read that terminal with `hc read t38`.
 - The bell lights up when an agent is waiting on you; click it to jump there.
